@@ -1,0 +1,86 @@
+﻿{
+  "family": {
+    "id": 0,
+    "family_id": "9999209abe5bf545808c4b4930df51d78cc8a2af4181b669b15ff8e621e2433b",
+    "upload": {
+      "id": 0,
+      "file_3d_id": "30f24512aef92a5c8cff9e5e97520ac607d7048135fb3b5b723ac6316b1a6505",
+      "file_2d_id": null,
+      "file_pdf_id": "3dfc94afd1c2567735ebca5b099aaefd8ebcd8e34ed44b34b7eaa07333f9f072",
+      "file_txt_id": null,
+      "create_login": "alexandr.runov@aerbim.com",
+      "check_login": "alexandr.runov@aerbim.com",
+      "upload_login": "alexandr.runov@aerbim.com",
+      "upload_time": "2023-03-04T10:17:49.6166011Z"
+    },
+    "version": {
+      "id": 0,
+      "revit_version": "Autodesk Revit 2019",
+      "family_version": 1,
+      "language": "ru",
+      "country": "",
+      "plugin_version": 1,
+      "lod": {
+        "id": 0,
+        "lod100": false,
+        "lod200": true,
+        "lod300": false,
+        "lod350": true,
+        "lod400": false
+      },
+      "require_face": false,
+      "created_by": "aerbim",
+      "created_url": "https://aerbim.com",
+      "adapted_for": ""
+    },
+    "specification": {
+      "id": 0,
+      "family_role": "standard",
+      "brand_code": "omega_sound",
+      "revit_name": "ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11",
+      "full_name": "Прибор управления световым оповещением",
+      "short_name": "Прибор управления",
+      "series": "",
+      "article": "ОСА-1",
+      "revit_category": "nurse_call_devices",
+      "aerbim_category": [
+        {
+          "id": 0,
+          "category": "fire/alarm/control"
+        }
+      ],
+      "embedded": [],
+      "subtype": [],
+      "is_part_of_complex": false,
+      "other_part": []
+    }
+  },
+  "file_list": [
+    {
+      "id": 0,
+      "file_id": "30f24512aef92a5c8cff9e5e97520ac607d7048135fb3b5b723ac6316b1a6505",
+      "file_content_id": "6265640262a437abb37374fa1eaf8ff61484df8ddcb5b6b8b04b71b93cef6d43",
+      "file_name": "ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11.rfa",
+      "mime_type": "application/rfa",
+      "upload_time": "2023-03-04T10:17:49.3981388Z",
+      "upload_login": "alexandr.runov@aerbim.com"
+    },
+    {
+      "id": 0,
+      "file_id": "3dfc94afd1c2567735ebca5b099aaefd8ebcd8e34ed44b34b7eaa07333f9f072",
+      "file_content_id": "4865555d9717d442e2904ec986a028fcd3b6f7789ee8467209bb18bbd87262e6",
+      "file_name": "ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11.pdf",
+      "mime_type": "application/pdf",
+      "upload_time": "2023-03-04T10:17:49.5086135Z",
+      "upload_login": "alexandr.runov@aerbim.com"
+    }
+  ],
+  "file_3d_path": "D:\\Autodesk_Revit_2019\\мои\\Семейства_BIM\\3DSDбд\\новые\\ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11\\ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11.rfa",
+  "file_3d_time": "2022-10-24T13:27:47.694531Z",
+  "file_2d_path": "",
+  "file_2d_time": "0001-01-01T00:00:00",
+  "file_pdf_path": "D:\\Autodesk_Revit_2019\\мои\\Семейства_BIM\\3DSDбд\\новые\\ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11\\ARBM_Прибор_Управления_Оповещением_Световым_Омега-Саунд_ОСА-1_Ru_11.pdf",
+  "file_pdf_time": "2023-03-02T12:10:34.313909Z",
+  "file_txt_path": "",
+  "file_txt_time": "0001-01-01T00:00:00"
+}

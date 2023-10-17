@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>AerBIM Manager</Name>
+    <Assembly>D:\Visual Studio\PluginForRevit2022\bin\Debug\PluginForRevit2022.dll</Assembly>
+    <ClientId>E6966094-298D-4E0A-BE44-7283D558AFE2</ClientId>
+    <FullClassName>PluginForRevit2022.App</FullClassName>
+    <VendorId>AerBIM</VendorId>
+    <VendorDescription>Aerbim</VendorDescription>
+  </AddIn>
+</RevitAddIns>

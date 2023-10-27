@@ -1713,7 +1713,7 @@ namespace Aerbim._3DSD.Test
                 {
                     string notLoadSharedParamFileWarning = $"The file of shared parameters {filePath} is not loaded.";
                     logger.LogWarning(notLoadSharedParamFileWarning);
-                    MessageBox.Show($"'{notLoadSharedParamFileWarning}'", "Rename families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    System.Windows.Forms.MessageBox.Show($"'{notLoadSharedParamFileWarning}'", "Rename families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return false;
                 }
 
@@ -1724,7 +1724,7 @@ namespace Aerbim._3DSD.Test
             {
                 string notLoadSharedParamFileWarning = $"EXCEPTION '{exp.Message}'. File '{filePath}' cant load.";
                 logger.LogWarning(notLoadSharedParamFileWarning);
-                MessageBox.Show($"'{notLoadSharedParamFileWarning}'", "Rename families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                System.Windows.Forms.MessageBox.Show($"'{notLoadSharedParamFileWarning}'", "Rename families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
 

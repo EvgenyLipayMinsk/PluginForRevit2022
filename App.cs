@@ -46,8 +46,8 @@ namespace PluginForRevit2022
             SplitButtonData splitMainButton = new SplitButtonData("Main Button", "Main Button");
             SplitButton sButton = workPanel.AddItem(splitMainButton) as SplitButton;
 
-            PushButtonData pbd2 = new PushButtonData("Button1", "Button1", curAssembly, "Button1");
-            pbd2.ToolTip = "This is ToolTip";
+            PushButtonData pbd2 = new PushButtonData("Remove Parameters", "Remove\rParameters", curAssembly, "PluginForRevit2022.CmdRemoveParameters");
+            pbd2.ToolTip = "Remove parameters";
             pbd2.LongDescription = "This is Long description of button1";
             pbd2.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "settingsMain.ico"), UriKind.Absolute));
             var pb2 = sButton.AddPushButton(pbd2);

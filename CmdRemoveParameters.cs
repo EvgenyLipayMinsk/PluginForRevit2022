@@ -27,7 +27,7 @@ namespace PluginForRevit2022
             FilteredElementCollector collector = new FilteredElementCollector(doc);
 
             //List<ElementId> parameters = collector.WherePasses(parametersFilter).Where(e => e.Name.Equals("AER_ТП_Потребляемая мощность")).ToList().ConvertAll(e => e.Id);
-            ICollection<Element> parameters = (List<Element>)collector.OfClass(typeof(ParameterElement)).WhereElementIsNotElementType().ToElements();
+            List<Element> parameters = collector.OfClass(typeof(ParameterElement)).WhereElementIsNotElementType().ToList();
 
             UserRemoveParameters userRemoveParameters = new UserRemoveParameters(parameters, doc);
             userRemoveParameters.ShowDialog();

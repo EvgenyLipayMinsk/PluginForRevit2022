@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms;
-using System.Collections;
 using MS.Internal.Controls;
 using System.Xml.Linq;
+using System.Linq;
 
 namespace PluginForRevit2022
 {
@@ -18,80 +18,42 @@ namespace PluginForRevit2022
     /// </summary>
     public partial class UserRemoveParameters : Window
     {
-        ICollection<Element> allParameters = null;
         
-        Autodesk.Revit.DB.Document doc;
-        public UserRemoveParameters(ICollection<Element> elements, Autodesk.Revit.DB.Document doc)
+        Autodesk.Revit.DB.Document m_doc;
+        public UserRemoveParameters(List<Element> elements, Autodesk.Revit.DB.Document doc)
         {
             InitializeComponent();
-            allParameters = elements;
-           
-            foreach (var parameter in allParameters)
-            {
-                //System.Windows.Controls.ListBox checkParam = new System.Windows.Controls.ListBox();
-                //checkParam.DisplayMemberPath = parameter.Name;
-                //RemoveParametersList.Children.Add(checkParam);
-                ParametersListBox.DisplayMemberPath = parameter.Name;
-            }
 
-            //RemoveParametersList.DisplayMemberPath = "Name";
+            m_doc = doc;
+            
+            listBox.ItemsSource = elements;
         }
         private void removeParametersButton(object sender, RoutedEventArgs e)
         {
-            ICollection<Element> parametersForRemove = null;
-            ICollection<Element> allCheckedParameters = null;
-
-            if (ParametersListBox.SelectedItems != null)
-            {
-                allCheckedParameters = (ICollection<Element>)ParametersListBox.SelectedItems;
-            }
-
-            //UIElementCollection comboBoxes = RemoveParametersList.Children;
-            //List<String> allCheckedParameters = new List<string>();
-            //foreach (UIElement element1 in comboBoxes)
-            //{
-
-
-            //    //System.Windows.Controls.CheckBox comboBox = element as System.Windows.Controls.CheckBox;
-            //    System.Windows.Controls.CheckBox comboBox = element1 as System.Windows.Controls.CheckBox;
-            //    if (comboBox.IsChecked == true)
-            //        allCheckedParameters.Add(comboBox.Content.ToString());
-            //}
-            foreach (Element element1 in allParameters)
-            {
-                string parameterName = element1.Name;
-                if (allCheckedParameters.Contains(element1))
-                {
-                    parametersForRemove.Add(element1);
-                }
-            }
-           
-            RemoveParameters(parametersForRemove,doc);
+            List<Element> deletedParameters = listBox.SelectedItems.Cast<Element>().ToList();
+     
+            RemoveParameters(deletedParameters);
         }
-        public void RemoveParameters(ICollection<Element> parameters, Autodesk.Revit.DB.Document doc)
+
+        public void RemoveParameters(List<Element> deletedParameters)
         {
-            int count = 0;
-            using (Transaction t = new Transaction(doc, "Delete Parameter"))
+            
+            using (Transaction t = new Transaction(m_doc, "Delete Parameter"))
             {
                 // start a transaction within the valid Revit API context
                 t.Start();
-                foreach (Element param in parameters)
-                {
-                    doc.Delete((ICollection<ElementId>)param);
-                    count++;
-                }
+                List<ElementId> deletedParameterIds = deletedParameters.Select(e => e.Id).ToList();
+                m_doc.Delete(deletedParameterIds);
+            
                 t.Commit();
                 t.Dispose();
             }
-            string cmdRemoveInfo = $"Remove {count} parameters";
-            System.Windows.Forms.MessageBox.Show($"'{cmdRemoveInfo}'", "Resave families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-
-
 
         private void Button_Click_Cancel(object sender, RoutedEventArgs e)
         {
             
         }
+
     }
 }

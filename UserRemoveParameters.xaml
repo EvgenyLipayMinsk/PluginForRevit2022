@@ -15,8 +15,15 @@
         </Grid.RowDefinitions>
 
         <StackPanel x:Name="RemoveParametersList" Grid.Row="0">
-            <TextBlock Grid.Row="0" Text="Параметры для удаления:"/>
-            <ListBox x:Name="ParametersListBox"  SelectionMode="Multiple" Height="100" />
+            <TextBlock Text="Параметры для удаления:"/>
+            <ListBox x:Name="listBox"  SelectionMode="Multiple" Height="365" >
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                    <TextBlock Text="{Binding Name}"/>
+                    </DataTemplate>
+                 </ListBox.ItemTemplate>
+            </ListBox>
+                     
             
         </StackPanel>
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="5">

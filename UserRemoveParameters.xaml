@@ -18,10 +18,15 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="{x:Type ListBoxItem}">
-                                    <Border Background="{TemplateBinding Background}" BorderBrush="Black" BorderThickness="1" Margin="0,1">
-                                        <TextBlock Background = "{Binding Path=Background, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
-                                        <ContentPresenter ></ContentPresenter>
-                                        </TextBlock>
+                                   <Border Background="{TemplateBinding Background}" BorderBrush="Black" BorderThickness="1" Margin="0,1">
+                                        <CheckBox  Focusable="False" IsChecked="{Binding Path=IsSelected, Mode=TwoWay,                                                
+                                             RelativeSource={RelativeSource TemplatedParent}}" Background = "{Binding Path=Background, Mode=TwoWay,                                                
+                                             RelativeSource={RelativeSource TemplatedParent}}" Foreground = "{Binding Path=Foreground, Mode=TwoWay,                                                
+                                             RelativeSource={RelativeSource TemplatedParent}}" HorizontalAlignment="Left" VerticalAlignment="Center" Padding="1,1">
+                                            <TextBlock Background = "{Binding Path=Background, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" FontSize="12" >
+                                                   <ContentPresenter ></ContentPresenter>
+                                            </TextBlock>
+                                        </CheckBox>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="ItemsControl.AlternationIndex" Value="0">

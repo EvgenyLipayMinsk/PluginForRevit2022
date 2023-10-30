@@ -22,6 +22,10 @@ namespace PluginForRevit2022
         public UserRemoveParameters(List<Element> elements, Autodesk.Revit.DB.Document doc)
         {
             InitializeComponent();
+
+            // окно помещается в центре экрана
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
             Parameters = new ObservableCollection<Element>(elements);
 
             m_doc = doc;
@@ -34,7 +38,10 @@ namespace PluginForRevit2022
         private void removeParametersButton(object sender, RoutedEventArgs e)
         {
             List<Element> deletedParameters = listBox.SelectedItems.Cast<Element>().ToList();
-     
+
+            // Проверять присвоенно ли парамерам занчение в проекте?
+
+
             RemoveParameters(deletedParameters);
         }
 
@@ -46,6 +53,7 @@ namespace PluginForRevit2022
             {
                 info.Append($"{deletedParameter.Name}\n");
                 Parameters.Remove(deletedParameter);
+                
             }
 
             using (Transaction t = new Transaction(m_doc, "Delete Parameter"))
@@ -58,19 +66,13 @@ namespace PluginForRevit2022
                 t.Commit();
                 t.Dispose();
             }
-            // Проверять присвоенно ли парамерам занчение в проекте?
+           
             
-            //foreach (var deletedParameter in deletedParameters)
-            //{
-            //    Parameters.Remove(deletedParameter);
-            //}
-
-            System.Windows.Forms.MessageBox.Show($"'{info}'", "Delet parameters command", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            System.Windows.Forms.MessageBox.Show($"'{info}'", "Delete parameters command", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         // обработчик изменения коллекции
         void Parameters_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
-           
             if (e.OldItems?[0] is List<Element>)
             {
                 listBox.ItemsSource = Parameters;

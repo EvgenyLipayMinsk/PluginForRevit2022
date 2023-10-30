@@ -7,6 +7,40 @@
              mc:Ignorable="d" 
         Width="450" Height="450"
              d:DesignHeight="450" d:DesignWidth="450">
+    <Window.Resources>
+        <Style x:Key="ListStyle1" TargetType="{x:Type ListBox}">
+            <Setter Property="SelectionMode" Value="Multiple"></Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="{x:Type ListBoxItem}">
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Background" Value="LightGray"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                                    <Border Background="{TemplateBinding Background}" BorderBrush="Black" BorderThickness="1" Margin="0,1">
+                                        <TextBlock Background = "{Binding Path=Background, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                        <ContentPresenter ></ContentPresenter>
+                                        </TextBlock>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="ItemsControl.AlternationIndex" Value="0">
+                                            <Setter Property="Background" Value="White"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Foreground" Value="Black"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                            <Setter Property="Background" Value="LightBlue"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Grid Grid.ShowGridLines ="True">
 
         <Grid.RowDefinitions>
@@ -16,7 +50,7 @@
 
         <StackPanel x:Name="RemoveParametersList" Grid.Row="0">
             <TextBlock Text="Параметры для удаления:"/>
-            <ListBox x:Name="listBox"  SelectionMode="Multiple" Height="365" >
+            <ListBox AlternationCount="2" Style = "{StaticResource ListStyle1}" x:Name="listBox"  SelectionMode="Multiple" Height="365" >
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                     <TextBlock Text="{Binding Name}"/>

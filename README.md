@@ -1,5 +1,6 @@
 # Plugin For Revit 2022
-This is Plugin for revit 2022
+
+## Запуск плагина в Visual Studio
 
 Что бы начать работу с плагином Вам потребуется установить Autodesk Revit 2022, далее в проекте нужно обновить ссылки для следующих .dll: RevitUI.dll и RevitUIAPI.dll
 
@@ -14,7 +15,9 @@ This is Plugin for revit 2022
 
 ![image](https://github.com/EvgenyLipayMinsk/PluginForRevit2022/assets/69685960/061cbc21-5e96-45a6-b888-c5f0df629921)
 
-# Работа плагина
+## Запуск плагина в Visual Studio
+
+### Remove Parameters
 
 Клавиша "Remove Parameters" ![image](https://github.com/EvgenyLipayMinsk/PluginForRevit2022/assets/69685960/f8980660-7935-4c3c-96fe-92b82260b9a8) позволяет удалять выделеные параметры из проекта:
 
@@ -24,6 +27,7 @@ This is Plugin for revit 2022
 
 ![image](https://github.com/EvgenyLipayMinsk/PluginForRevit2022/assets/69685960/3cca7a79-2e07-4e0a-9560-937ee51d4ec3)
 
+### Convert File to RVT2022
 
 Клавиша "Convert File to RVT2022" ![image](https://github.com/EvgenyLipayMinsk/PluginForRevit2022/assets/69685960/5729c78b-ac45-46a6-995d-684aa9ee7d9b) пересохраняет семейства в Revit 2022 и каталог файлов из одного каталога в другой.
 

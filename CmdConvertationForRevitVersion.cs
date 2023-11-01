@@ -29,6 +29,8 @@ namespace PluginForRevit2022
             BuiltInCategory.OST_NurseCallDevices,
             BuiltInCategory.OST_TelephoneDevices,
             BuiltInCategory.OST_SecurityDevices,
+            BuiltInCategory.OST_AnnotationCrop
+           
         };
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
@@ -45,9 +47,9 @@ namespace PluginForRevit2022
                 string folder_settings_path = pathForAssembly + @"\folder_settings_remote_path.json";
                 string log_path = pathForAssembly + @"\folder_result.log";
 
-                var log_f = new FileLogger(log_path, true); // Зачем?
+                var log_f = new FileLogger(log_path, true);
 
-                log.ChainLogger(log_f); // Зачем?
+                log.ChainLogger(log_f); 
 
                 var folder_settings = FolderSettings.FromFile(folder_settings_path);
 
@@ -88,10 +90,10 @@ namespace PluginForRevit2022
 
                 // Get current file of shared parameters
                 //pathToPreviewSharedParametersFile = revitApp.SharedParametersFilename;
-                log.LogInfo($"Current was shared parameters filename '{pathToPreviewSharedParametersFile}'.");
+                //log.LogInfo($"Current was shared parameters filename '{pathToPreviewSharedParametersFile}'.");
 
-                string pathToSharedParametersFile = pathForAssembly + @"\ARBM_TOTAL_PARAMETERS_FOR_ARBM_FAMILIES.v1.0.txt";
-                log.LogInfo($"New will be shared parameters filename '{pathToSharedParametersFile}'.");
+                //string pathToSharedParametersFile = pathForAssembly + @"\ARBM_TOTAL_PARAMETERS_FOR_ARBM_FAMILIES.v1.0.txt";
+                //log.LogInfo($"New will be shared parameters filename '{pathToSharedParametersFile}'.");
 
                 // Load and open our file with shared parameters
                 //if (ArbmAPIElementHelper.SetSharedParametersFile(revitApp, pathToSharedParametersFile, log) == false)
@@ -180,7 +182,7 @@ namespace PluginForRevit2022
                 MessageBox.Show($"'{cmdExceptionWarning}'", "Resave families command", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 // Restore path to the preview shared parameters file
-                ArbmAPIElementHelper.SetSharedParametersFile(revitApp, pathToPreviewSharedParametersFile, log);
+                //ArbmAPIElementHelper.SetSharedParametersFile(revitApp, pathToPreviewSharedParametersFile, log);
                 return Result.Failed;
             }
             

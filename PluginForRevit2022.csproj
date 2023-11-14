@@ -48,9 +48,6 @@
       <HintPath>C:\Program Files\Autodesk\Revit 2022\RevitAPIUI.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="ScanFolderCopyAndProcess">
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\ScanFolderCopyAndProcess.exe</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
@@ -69,10 +66,15 @@
     <Compile Include="App.cs" />
     <Compile Include="ArbmAPIElementHelper.cs" />
     <Compile Include="ArbmFamiliesManager.cs" />
-    <Compile Include="Parameters.cs" />
+    <Compile Include="CmdGetLocationOfCategory.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
     <Compile Include="CmdConvertationForRevitVersion.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
     <Compile Include="UserRemoveParameters.xaml.cs">
       <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
     </Compile>
@@ -87,15 +89,22 @@
     </Page>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Resourses\button1.ico" />
-    <Content Include="Resourses\button2.ico" />
-    <Content Include="Resourses\DB.ico" />
-    <Content Include="Resourses\icons8-folders-32.ico" />
-    <Content Include="Resourses\icons8-корзина-16.ico" />
-    <Content Include="Resourses\icons8-папка-16.ico" />
-    <Content Include="Resourses\icons8-папка-пользователя-16.ico" />
-    <Content Include="Resourses\icons8-проводник-windows-16.ico" />
-    <Content Include="Resourses\settingsMain.ico" />
+    <ProjectReference Include="ScanFolderCopyAndProcess\ScanFolderCopyAndProcess.csproj">
+      <Project>{1AE64269-386D-4C28-AE82-CD071F4B3463}</Project>
+      <Name>ScanFolderCopyAndProcess</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resourses\Convert to RVT2022.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resourses\Remove Parameters.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

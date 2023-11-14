@@ -82,12 +82,5 @@ namespace PluginForRevit2022
         {
             Close();
         }
-
-      
-
-        
-        
-
     }
-
 }

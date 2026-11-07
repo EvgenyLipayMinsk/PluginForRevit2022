@@ -63,26 +63,6 @@ namespace PluginForRevit2022.Properties {
         /// <summary>
         ///   Поиск локализованного ресурса типа System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap Add_SharedParameters {
-            get {
-                object obj = ResourceManager.GetObject("Add_SharedParameters", resourceCulture);
-                return ((System.Drawing.Bitmap)(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Поиск локализованного ресурса типа System.Drawing.Bitmap.
-        /// </summary>
-        internal static System.Drawing.Bitmap Convert_to_RVT2022 {
-            get {
-                object obj = ResourceManager.GetObject("Convert_to_RVT2022", resourceCulture);
-                return ((System.Drawing.Bitmap)(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Поиск локализованного ресурса типа System.Drawing.Bitmap.
-        /// </summary>
         internal static System.Drawing.Bitmap Remove_Parameters {
             get {
                 object obj = ResourceManager.GetObject("Remove_Parameters", resourceCulture);

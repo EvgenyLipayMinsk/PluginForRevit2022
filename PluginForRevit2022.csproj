@@ -31,13 +31,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="AlphaFS">
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\AlphaFS.dll</HintPath>
-    </Reference>
-    <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\Newtonsoft.Json.dll</HintPath>
-    </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="RevitAPI">
@@ -64,12 +57,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
-    <Compile Include="ArbmAPIElementHelper.cs" />
-    <Compile Include="ArbmFamiliesManager.cs" />
-    <Compile Include="CmdAddSharedParameters.cs" />
-    <Compile Include="CmdGetLocationOfCategory.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
-    <Compile Include="CmdConvertationForRevitVersion.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
@@ -90,25 +78,13 @@
     </Page>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="ScanFolderCopyAndProcess\ScanFolderCopyAndProcess.csproj">
-      <Project>{1AE64269-386D-4C28-AE82-CD071F4B3463}</Project>
-      <Name>ScanFolderCopyAndProcess</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Resourses\Convert to RVT2022.png" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="Resourses\Remove Parameters.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="Resourses\Add_SharedParameters.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- Debug: copy the .addin manifest to Revit 2022 and point it at the freshly built DLL -->

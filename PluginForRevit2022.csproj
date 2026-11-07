@@ -89,8 +89,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
+    <Compile Include="CmdAddSharedParameters.cs" />
     <Compile Include="CmdMcp.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
+    <Compile Include="Core\ProjectParameterOperations.cs" />
+    <Compile Include="Core\RevitIds.cs" />
+    <Compile Include="Core\SharedParameterOperations.cs" />
+    <Compile Include="Mcp\McpArgs.cs" />
     <Compile Include="Mcp\McpCommandExecutor.cs" />
     <Compile Include="Mcp\McpEventQueue.cs" />
     <Compile Include="Mcp\McpHost.cs" />
@@ -106,11 +111,18 @@
     <Compile Include="UserRemoveParameters.xaml.cs">
       <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
     </Compile>
+    <Compile Include="UI\AddSharedParametersWindow.xaml.cs">
+      <DependentUpon>AddSharedParametersWindow.xaml</DependentUpon>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <None Include="PluginForRevit2022.addin" />
   </ItemGroup>
   <ItemGroup>
+    <Page Include="UI\AddSharedParametersWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="UserRemoveParameters.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>

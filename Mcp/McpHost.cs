@@ -90,7 +90,7 @@ namespace PluginForRevit2022.Mcp
             McpSocketService service = _service;
             _queue.Enqueue(uiApp =>
             {
-                McpResponse response = new McpCommandExecutor(uiApp).Execute(request);
+                McpResponse response = McpCommandExecutor.Execute(uiApp, request);
                 _ = service?.SendAsync(response);
             });
         }
@@ -111,8 +111,8 @@ namespace PluginForRevit2022.Mcp
             _toggleButton.Image = CreateIndicator(on ? Color.FromRgb(46, 160, 67) : Color.FromRgb(140, 140, 140), 16);
         }
 
-        /// <summary>Иконка-индикатор: цветной круг с буквами MCP.</summary>
-        internal static BitmapSource CreateIndicator(Color color, int size)
+        /// <summary>Иконка-индикатор: цветной круг с коротким текстом (по умолчанию MCP).</summary>
+        internal static BitmapSource CreateIndicator(Color color, int size, string label = "MCP")
         {
             var visual = new DrawingVisual();
             using (DrawingContext dc = visual.RenderOpen())
@@ -120,7 +120,7 @@ namespace PluginForRevit2022.Mcp
                 dc.DrawEllipse(new SolidColorBrush(color), null, new Point(size / 2.0, size / 2.0), size / 2.0 - 1, size / 2.0 - 1);
                 if (size >= 24)
                 {
-                    var text = new FormattedText("MCP", CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                    var text = new FormattedText(label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
                         new Typeface("Segoe UI Semibold"), size * 0.3, Brushes.White, 1.0);
                     dc.DrawText(text, new Point((size - text.Width) / 2, (size - text.Height) / 2));
                 }

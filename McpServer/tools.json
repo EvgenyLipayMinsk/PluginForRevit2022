@@ -1,0 +1,99 @@
+{
+  "$comment": "MCP tools of the AerBIM Manager Revit add-in. Each name must match a command registered in Mcp/McpCommandExecutor.cs. inputSchema is JSON Schema; defaults are applied by the server before the call.",
+  "tools": [
+    {
+      "name": "ping",
+      "title": "Check Revit connection",
+      "description": "Checks that the AerBIM Manager add-in in Revit is reachable. Returns Revit version, the active document, the shared parameter file selected in Revit and the list of available commands.",
+      "inputSchema": { "type": "object", "properties": {} },
+      "annotations": { "readOnlyHint": true }
+    },
+    {
+      "name": "list_project_parameters",
+      "title": "List project parameters",
+      "description": "Lists project parameters of the active Revit project (Manage > Project Parameters): id, name, kind (shared/project), GUID, binding (instance/type), properties-palette group and bound categories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nameContains": { "type": "string", "description": "Return only parameters whose name contains this text (case-insensitive)." }
+        }
+      },
+      "annotations": { "readOnlyHint": true }
+    },
+    {
+      "name": "remove_project_parameter",
+      "title": "Remove a project parameter",
+      "description": "Removes a project parameter from the active Revit project by id or exact name. All values of this parameter in all elements are lost, and dependent elements may be removed. dryRun defaults to true: it only reports what would be deleted. Show the preview to the user and get explicit confirmation before calling again with dryRun=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "description": "Parameter id from list_project_parameters (preferred)." },
+          "name": { "type": "string", "description": "Exact parameter name. If several parameters share it, use id." },
+          "dryRun": { "type": "boolean", "default": true, "description": "true = preview only (default); false = actually delete." }
+        }
+      },
+      "annotations": { "readOnlyHint": false, "destructiveHint": true }
+    },
+    {
+      "name": "read_shared_parameter_file",
+      "title": "Read shared parameter file (ФОП)",
+      "description": "Reads a Revit shared parameter file (ФОП): groups and parameters with name, GUID, data type and description. Without filePath reads the file currently selected in Revit. Revit's own setting is restored afterwards.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Full path to the shared parameter .txt file. Omit to use the file selected in Revit." },
+          "nameContains": { "type": "string", "description": "Return only parameters whose name contains this text." },
+          "group": { "type": "string", "description": "Return only parameters of this group of the file." }
+        }
+      },
+      "annotations": { "readOnlyHint": true }
+    },
+    {
+      "name": "list_bindable_categories",
+      "title": "List bindable categories",
+      "description": "Lists categories of the active project that project parameters can be bound to: localized name, BuiltInCategory (OST_*) and category type. Use these names or OST_ ids in add_shared_parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nameContains": { "type": "string", "description": "Return only categories whose name contains this text." }
+        }
+      },
+      "annotations": { "readOnlyHint": true }
+    },
+    {
+      "name": "list_parameter_groups",
+      "title": "List parameter groups",
+      "description": "Lists properties-palette groups (e.g. data, text, identity_data, constraints) with localized labels. Use key, label or typeId as parameterGroup in add_shared_parameters.",
+      "inputSchema": { "type": "object", "properties": {} },
+      "annotations": { "readOnlyHint": true }
+    },
+    {
+      "name": "add_shared_parameters",
+      "title": "Add shared parameters from ФОП",
+      "description": "Adds shared parameters from a shared parameter file (ФОП) to the active document. In a project: binds them to the given categories as instance or type parameters; if a parameter is already bound with the same binding, missing categories are added. Changing instance/type of an existing project parameter is refused because it erases values. In the family editor: adds the parameters to the current family (categories are ignored); allowKindChange switches instance/type of parameters already in the family. dryRun defaults to true: report what would change. Show the preview and get the user's confirmation before calling with dryRun=false. Changes are undoable in Revit (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "required": ["parameters"],
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Parameters from the file: GUID (preferred), exact name, or 'Group/Name' when the name is not unique."
+          },
+          "categories": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Project only: category names as in Revit or BuiltInCategory ids (OST_Walls). See list_bindable_categories."
+          },
+          "binding": { "type": "string", "enum": ["instance", "type"], "default": "instance", "description": "Instance (экземпляр) or type (тип) parameter." },
+          "parameterGroup": { "type": "string", "description": "Properties-palette group: key (data), label or typeId. Default: data. See list_parameter_groups." },
+          "filePath": { "type": "string", "description": "Full path to the shared parameter file. Omit to use the file selected in Revit." },
+          "allowKindChange": { "type": "boolean", "default": false, "description": "Family editor only: switch instance/type of parameters that already exist in the family." },
+          "dryRun": { "type": "boolean", "default": true, "description": "true = preview only (default); false = apply." }
+        }
+      },
+      "annotations": { "readOnlyHint": false, "destructiveHint": false }
+    }
+  ]
+}

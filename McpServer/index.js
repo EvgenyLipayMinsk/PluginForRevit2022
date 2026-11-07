@@ -3,6 +3,9 @@
 //
 //   AI client (Claude Code / Claude Desktop) --stdio--> this server --WebSocket--> Revit add-in (localhost:8965)
 //
+// Tools are declared in tools.json; every call is forwarded to the add-in command of the same name
+// (Mcp/McpCommandExecutor.cs). Adding a command = register it in C# + add an entry to tools.json.
+//
 // The message format follows REVIT_MCP_study (MIT, github.com/shuotao/REVIT_MCP_study):
 //   request  {"CommandName", "Parameters", "RequestId"}
 //   response {"Success", "Data", "Error", "RequestId"}
@@ -10,14 +13,15 @@
 // stdout belongs to the MCP protocol: log only to stderr.
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import WebSocket from "ws";
-import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const DEFAULT_PORT = 8965;
 const CONNECT_TIMEOUT_MS = 5000;
-const COMMAND_TIMEOUT_MS = 60000;
+const COMMAND_TIMEOUT_MS = 120000;
 
 function getPort() {
   const raw = process.env.AERBIM_MCP_PORT;
@@ -30,6 +34,8 @@ function getPort() {
 }
 
 const PORT = getPort();
+const TOOLS = JSON.parse(readFileSync(new URL("./tools.json", import.meta.url), "utf8")).tools;
+const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
 class RevitConnection {
   constructor(port) {
@@ -123,68 +129,56 @@ class RevitConnection {
   }
 }
 
-const revit = new RevitConnection(PORT);
+/** Applies schema defaults and checks required / basic types, so the add-in always gets explicit values. */
+function prepareArguments(tool, args) {
+  const schema = tool.inputSchema || {};
+  const props = schema.properties || {};
+  const result = {};
+  for (const [key, value] of Object.entries(args || {})) {
+    if (value !== undefined && value !== null && key in props) result[key] = value;
+  }
+  for (const [key, prop] of Object.entries(props)) {
+    if (!(key in result) && "default" in prop) result[key] = prop.default;
+  }
+  const errors = [];
+  for (const key of schema.required || []) {
+    if (!(key in result)) errors.push(`'${key}' is required`);
+  }
+  for (const [key, value] of Object.entries(result)) {
+    const prop = props[key];
+    const ok =
+      prop.type === "array" ? Array.isArray(value) && (!prop.minItems || value.length >= prop.minItems)
+      : prop.type === "integer" ? Number.isInteger(value)
+      : prop.type === "boolean" ? typeof value === "boolean"
+      : prop.type === "string" ? typeof value === "string" && (!prop.enum || prop.enum.includes(value))
+      : true;
+    if (!ok) errors.push(`'${key}' must be ${prop.type}${prop.enum ? ` (${prop.enum.join("|")})` : ""}`);
+  }
+  if (errors.length) throw new Error(`Invalid arguments for ${tool.name}: ${errors.join("; ")}`);
+  return result;
+}
 
-async function callRevit(commandName, parameters) {
+const revit = new RevitConnection(PORT);
+const server = new Server({ name: "aerbim-revit", version: "0.2.0" }, { capabilities: { tools: {} } });
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: TOOLS.map(({ name, title, description, inputSchema, annotations }) => ({
+    name, title, description, inputSchema, annotations,
+  })),
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const tool = TOOLS_BY_NAME.get(request.params.name);
+  if (!tool) {
+    return { isError: true, content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }] };
+  }
   try {
-    const data = await revit.send(commandName, parameters);
+    const data = await revit.send(tool.command || tool.name, prepareArguments(tool, request.params.arguments));
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   } catch (err) {
     return { isError: true, content: [{ type: "text", text: String(err.message || err) }] };
   }
-}
-
-const server = new McpServer({ name: "aerbim-revit", version: "0.1.0" });
-
-server.registerTool(
-  "ping",
-  {
-    title: "Check Revit connection",
-    description: "Checks that the AerBIM Manager add-in in Revit is reachable. Returns Revit version and the active document.",
-    annotations: { readOnlyHint: true },
-  },
-  async () => callRevit("ping", {}),
-);
-
-server.registerTool(
-  "list_project_parameters",
-  {
-    title: "List project parameters",
-    description: "Lists project parameters of the active Revit project (Manage > Project Parameters): id, name, " +
-      "kind (shared/project), binding (instance/type) and bound categories.",
-    inputSchema: {
-      nameContains: z.string().optional().describe("Return only parameters whose name contains this text (case-insensitive)."),
-    },
-    annotations: { readOnlyHint: true },
-  },
-  async ({ nameContains }) => callRevit("list_project_parameters", nameContains ? { nameContains } : {}),
-);
-
-server.registerTool(
-  "remove_project_parameter",
-  {
-    title: "Remove a project parameter",
-    description: "Removes a project parameter from the active Revit project by id or exact name. " +
-      "All values of this parameter in all elements are lost, and dependent elements (filters, schedule fields) may be removed. " +
-      "dryRun defaults to true: it only reports what would be deleted. " +
-      "Show the preview to the user and get explicit confirmation before calling again with dryRun=false.",
-    inputSchema: {
-      id: z.number().int().optional().describe("Parameter id from list_project_parameters (preferred)."),
-      name: z.string().optional().describe("Exact parameter name. If several parameters share it, use id."),
-      dryRun: z.boolean().optional().default(true).describe("true = preview only (default); false = actually delete."),
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true },
-  },
-  async ({ id, name, dryRun }) => {
-    if (id === undefined && !name) {
-      return { isError: true, content: [{ type: "text", text: "Provide id or name of the parameter." }] };
-    }
-    const parameters = { dryRun };
-    if (id !== undefined) parameters.id = id;
-    if (name) parameters.name = name;
-    return callRevit("remove_project_parameter", parameters);
-  },
-);
+});
 
 await server.connect(new StdioServerTransport());
-console.error(`[aerbim] MCP server ready (Revit add-in port ${PORT})`);
+console.error(`[aerbim] MCP server ready: ${TOOLS.length} tools, Revit add-in port ${PORT}`);

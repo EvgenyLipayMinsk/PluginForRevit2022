@@ -1,0 +1,118 @@
+<Window x:Class="PluginForRevit2022.UI.AddSharedParametersWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Добавить параметры из ФОП" Width="900" Height="680" MinWidth="700" MinHeight="500"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" FontSize="12">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+            <Setter Property="MinWidth" Value="90"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="3,2"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="140"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ФОП -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock DockPanel.Dock="Left" Text="ФОП:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Button DockPanel.Dock="Right" Content="Загрузить" Click="OnReloadFile"/>
+            <Button DockPanel.Dock="Right" Content="Обзор…" Click="OnBrowseFile"/>
+            <TextBox x:Name="FilePathBox" VerticalContentAlignment="Center"/>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Параметры из ФОП -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Параметры ФОП" Margin="0,0,0,4"/>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock x:Name="ParameterCountText" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="Gray"/>
+                    <TextBox x:Name="ParameterSearchBox" TextChanged="OnParameterSearchChanged" ToolTip="Поиск по имени или группе"/>
+                </DockPanel>
+                <ListBox x:Name="ParameterList" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,6,0,2" Foreground="#FF2B579A"/>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" ToolTip="{Binding Tooltip}">
+                                <TextBlock>
+                                    <Run Text="{Binding Name, Mode=OneWay}"/>
+                                    <Run Text="{Binding DataType, Mode=OneWay}" Foreground="Gray"/>
+                                </TextBlock>
+                            </CheckBox>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- Категории и настройки -->
+            <DockPanel Grid.Column="2">
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <TextBlock FontWeight="SemiBold" Text="Тип параметра" Margin="0,0,0,4"/>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="InstanceRadio" Content="Экземпляр" IsChecked="True" Margin="0,0,16,0"/>
+                        <RadioButton x:Name="TypeRadio" Content="Тип"/>
+                    </StackPanel>
+                    <TextBlock FontWeight="SemiBold" Text="Группа (палитра свойств)" Margin="0,8,0,4"/>
+                    <ComboBox x:Name="GroupCombo"/>
+                    <CheckBox x:Name="AllowKindChangeBox" Margin="0,8,0,0"
+                              Content="Переключать тип/экземпляр у уже добавленных"
+                              ToolTip="Только в редакторе семейств. В проекте смена стирает значения и не выполняется."/>
+                </StackPanel>
+
+                <TextBlock x:Name="FamilyNote" DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0" Visibility="Collapsed"
+                           Text="Открыт редактор семейств: параметры добавляются в текущее семейство, категории не нужны."/>
+
+                <DockPanel x:Name="CategoryPanel">
+                    <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Категории" Margin="0,4,0,4"/>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <CheckBox x:Name="OnlyCheckedCategoriesBox" DockPanel.Dock="Right" Content="выбранные" VerticalAlignment="Center"
+                                  Margin="6,0,0,0" Checked="OnCategoryFilterChanged" Unchecked="OnCategoryFilterChanged"/>
+                        <TextBox x:Name="CategorySearchBox" TextChanged="OnCategoryFilterChanged" ToolTip="Поиск категории"/>
+                    </DockPanel>
+                    <ListBox x:Name="CategoryList">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </DockPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Text="Результат" FontWeight="SemiBold" Margin="0,8,0,4"/>
+        <TextBox Grid.Row="3" x:Name="ResultBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                 FontFamily="Consolas" Background="#FFF7F7F7"/>
+
+        <DockPanel Grid.Row="4" Margin="0,10,0,0" LastChildFill="False">
+            <TextBlock x:Name="SelectionText" DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="Gray"/>
+            <Button DockPanel.Dock="Right" Content="Закрыть" IsCancel="True" Click="OnClose"/>
+            <Button DockPanel.Dock="Right" x:Name="ApplyButton" Content="Добавить" FontWeight="SemiBold" Click="OnApply"/>
+            <Button DockPanel.Dock="Right" Content="Предпросмотр" Click="OnPreview"/>
+        </DockPanel>
+    </Grid>
+</Window>

@@ -32,6 +32,14 @@ namespace PluginForRevit2022
             workPanel.AddItem(pbdRemoveParameters);
             #endregion
 
+            #region Параметры из ФОП
+            PushButtonData pbdAddShared = new PushButtonData("Add Shared Parameters", "Параметры\rиз ФОП", curAssembly, "PluginForRevit2022.CmdAddSharedParameters");
+            pbdAddShared.ToolTip = "Добавить общие параметры из ФОП в проект (с привязкой к категориям) или в открытое семейство.";
+            pbdAddShared.LongDescription = "Выберите параметры, категории, тип или экземпляр и группу. Сначала «Предпросмотр», затем «Добавить». То же доступно ИИ через MCP (add_shared_parameters).";
+            pbdAddShared.LargeImage = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(43, 87, 154), 32, "ФОП");
+            workPanel.AddItem(pbdAddShared);
+            #endregion
+
             #region Панель MCP: соединение с ИИ-клиентом
             var mcpPanel = application.CreateRibbonPanel(tabName, "MCP");
 

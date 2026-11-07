@@ -31,9 +31,11 @@ namespace PluginForRevit2022.Core
     /// <summary>Группа свойств, в которой параметр показывается в палитре свойств.</summary>
     internal sealed class ParameterGroupInfo
     {
-        public string Key { get; set; }
-        public string Label { get; set; }
-        public ForgeTypeId TypeId { get; set; }
+        public string Key => Group.Key;
+        public string Label => Group.Label;
+        /// <summary>Строковый id группы: TypeId (2022+) или имя BuiltInParameterGroup (2021).</summary>
+        public string Id => Group.Id;
+        internal RevitCompat.Group Group { get; set; }
 
         public override string ToString() => Label;
 
@@ -41,7 +43,7 @@ namespace PluginForRevit2022.Core
         {
             ["key"] = Key,
             ["label"] = Label,
-            ["typeId"] = TypeId.TypeId,
+            ["typeId"] = Id,
         };
     }
 
@@ -266,40 +268,11 @@ namespace PluginForRevit2022.Core
                 : null;
         }
 
-        public static List<ParameterGroupInfo> ParameterGroups()
-        {
-            var result = new List<ParameterGroupInfo>
-            {
-                new ParameterGroupInfo { Key = "other", Label = "Прочее", TypeId = new ForgeTypeId(string.Empty) },
-            };
-            foreach (ForgeTypeId id in ParameterUtils.GetAllBuiltInGroups())
-            {
-                string label;
-                try
-                {
-                    label = LabelUtils.GetLabelForGroup(id);
-                }
-                catch
-                {
-                    continue;
-                }
-                result.Add(new ParameterGroupInfo { Key = GroupKey(id), Label = label, TypeId = id });
-            }
-            return result
-                .GroupBy(g => g.TypeId.TypeId).Select(g => g.First())
+        public static List<ParameterGroupInfo> ParameterGroups() =>
+            RevitCompat.AllGroups()
+                .Select(g => new ParameterGroupInfo { Group = g })
                 .OrderBy(g => g.Label, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
-        }
-
-        /// <summary>«autodesk.parameter.group:data-1.0.0» → «data».</summary>
-        private static string GroupKey(ForgeTypeId id)
-        {
-            string typeId = id.TypeId ?? string.Empty;
-            int colon = typeId.LastIndexOf(':');
-            string key = colon >= 0 ? typeId.Substring(colon + 1) : typeId;
-            int dash = key.LastIndexOf('-');
-            return dash > 0 ? key.Substring(0, dash) : key;
-        }
 
         public static ParameterGroupInfo ResolveGroup(string value)
         {
@@ -307,7 +280,7 @@ namespace PluginForRevit2022.Core
             string wanted = string.IsNullOrWhiteSpace(value) ? DefaultGroupKey : value.Trim();
             ParameterGroupInfo match = groups.FirstOrDefault(g =>
                 string.Equals(g.Key, wanted, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(g.TypeId.TypeId, wanted, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(g.Id, wanted, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(g.Label, wanted, StringComparison.CurrentCultureIgnoreCase));
             if (match == null)
             {
@@ -469,7 +442,7 @@ namespace PluginForRevit2022.Core
                 ElementBinding binding = isInstance
                     ? (ElementBinding)app.Create.NewInstanceBinding(merged)
                     : app.Create.NewTypeBinding(merged);
-                if (!doc.ParameterBindings.ReInsert(existing.Definition, binding, existing.Definition.GetGroupTypeId()))
+                if (!RevitCompat.ReInsertKeepGroup(doc.ParameterBindings, existing.Definition, binding))
                 {
                     return Item(definition, "failed", "Revit не обновил привязку");
                 }
@@ -494,7 +467,7 @@ namespace PluginForRevit2022.Core
             ElementBinding newBinding = isInstance
                 ? (ElementBinding)app.Create.NewInstanceBinding(set)
                 : app.Create.NewTypeBinding(set);
-            if (!doc.ParameterBindings.Insert(definition, newBinding, group.TypeId))
+            if (!RevitCompat.Insert(doc.ParameterBindings, definition, newBinding, group.Group))
             {
                 return Item(definition, "failed", "Revit не добавил привязку");
             }
@@ -537,7 +510,7 @@ namespace PluginForRevit2022.Core
                     $"в семействе уже есть параметр «{definition.Name}» " + (sameName.IsShared ? $"с другим GUID ({sameName.GUID})" : "(параметр семейства)"));
             }
 
-            manager.AddParameter(definition, group.TypeId, request.IsInstance);
+            RevitCompat.AddFamilyParameter(manager, definition, group.Group, request.IsInstance);
             return Item(definition, "added", $"добавлен как {(request.IsInstance ? "экземпляр" : "тип")}");
         }
 
@@ -587,17 +560,6 @@ namespace PluginForRevit2022.Core
                 Message = message,
             };
 
-        private static string SafeSpecLabel(ExternalDefinition definition)
-        {
-            try
-            {
-                ForgeTypeId spec = definition.GetDataType();
-                return spec == null ? null : LabelUtils.GetLabelForSpec(spec);
-            }
-            catch
-            {
-                try { return definition.GetDataType()?.TypeId; } catch { return null; }
-            }
-        }
+        private static string SafeSpecLabel(ExternalDefinition definition) => RevitCompat.SpecLabel(definition);
     }
 }

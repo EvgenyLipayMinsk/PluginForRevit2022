@@ -47,6 +47,47 @@ namespace PluginForRevit2022.Mcp
             return value is bool b ? b : bool.Parse(value.ToString());
         }
 
+        public double? Double(string key)
+        {
+            object value = Raw(key);
+            if (value == null || (value is string s && string.IsNullOrWhiteSpace(s)))
+            {
+                return null;
+            }
+            return Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+
+        public int? Int(string key)
+        {
+            long? value = Long(key);
+            return value == null ? (int?)null : checked((int)value.Value);
+        }
+
+        public double[] DoubleArray(string key)
+        {
+            if (!(Raw(key) is IEnumerable items) || Raw(key) is string)
+            {
+                return null;
+            }
+            return items.Cast<object>().Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+        }
+
+        /// <summary>Вложенный объект как McpArgs (или null).</summary>
+        public McpArgs Object(string key) =>
+            Raw(key) is Dictionary<string, object> dict ? new McpArgs(dict) : null;
+
+        /// <summary>Массив объектов.</summary>
+        public List<McpArgs> ObjectList(string key) =>
+            Raw(key) is IEnumerable items && !(Raw(key) is string)
+                ? items.Cast<object>().OfType<Dictionary<string, object>>().Select(d => new McpArgs(d)).ToList()
+                : new List<McpArgs>();
+
+        /// <summary>Объект «имя → значение» как словарь строк.</summary>
+        public Dictionary<string, string> StringMap(string key) =>
+            Raw(key) is Dictionary<string, object> dict
+                ? dict.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => Convert.ToString(kv.Value, CultureInfo.InvariantCulture))
+                : new Dictionary<string, string>();
+
         public List<string> StringList(string key)
         {
             object value = Raw(key);

@@ -18,6 +18,12 @@
     the build references that version's RevitAPI, F5 starts that Revit,
     and a Debug build registers the add-in in %AppData%\Autodesk\Revit\Addins\<version>.
   -->
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2021|AnyCPU' ">
+    <RevitVersion>2021</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2021|AnyCPU' ">
+    <RevitVersion>2021</RevitVersion>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2022|AnyCPU' ">
     <RevitVersion>2022</RevitVersion>
   </PropertyGroup>
@@ -92,9 +98,20 @@
     <Compile Include="CmdAddSharedParameters.cs" />
     <Compile Include="CmdMcp.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
+    <Compile Include="Core\DimensionOperations.cs" />
+    <Compile Include="Core\LinkScope.cs" />
+    <Compile Include="Core\PlacementOperations.cs" />
+    <Compile Include="Core\RoomTagOperations.cs" />
+    <Compile Include="Core\ViewGraphicsOperations.cs" />
     <Compile Include="Core\ProjectParameterOperations.cs" />
+    <Compile Include="Core\RenameOperations.cs" />
+    <Compile Include="Core\RevitCompat.cs" />
     <Compile Include="Core\RevitIds.cs" />
+    <Compile Include="Core\RevitText.cs" />
     <Compile Include="Core\SharedParameterOperations.cs" />
+    <Compile Include="Core\SheetLayoutOperations.cs" />
+    <Compile Include="Core\SheetOperations.cs" />
+    <Compile Include="Core\ViewOperations.cs" />
     <Compile Include="Mcp\McpArgs.cs" />
     <Compile Include="Mcp\McpCommandExecutor.cs" />
     <Compile Include="Mcp\McpEventQueue.cs" />

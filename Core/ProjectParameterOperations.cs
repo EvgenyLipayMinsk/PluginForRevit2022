@@ -138,17 +138,6 @@ namespace PluginForRevit2022.Core
             };
         }
 
-        internal static string SafeGroupLabel(Definition definition)
-        {
-            try
-            {
-                ForgeTypeId group = definition.GetGroupTypeId();
-                return group == null || string.IsNullOrEmpty(group.TypeId) ? "Прочее" : LabelUtils.GetLabelForGroup(group);
-            }
-            catch
-            {
-                return null;
-            }
-        }
+        internal static string SafeGroupLabel(Definition definition) => RevitCompat.GroupLabel(definition);
     }
 }

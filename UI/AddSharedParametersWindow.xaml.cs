@@ -163,7 +163,7 @@ namespace PluginForRevit2022.UI
                 Parameters = _parameters.Where(p => p.IsChecked).Select(p => p.Key).ToList(),
                 Categories = _categories.Where(c => c.IsChecked).Select(c => c.Key).ToList(),
                 IsInstance = InstanceRadio.IsChecked == true,
-                ParameterGroup = (GroupCombo.SelectedItem as ParameterGroupInfo)?.TypeId.TypeId,
+                ParameterGroup = (GroupCombo.SelectedItem as ParameterGroupInfo)?.Id,
                 AllowKindChange = AllowKindChangeBox.IsChecked == true,
                 DryRun = dryRun,
             };

@@ -53,6 +53,15 @@ namespace PluginForRevit2022
             var pb2 = workPanel.AddItem(pbd2) as PushButton;
             #endregion
 
+            #region Создание Add SharedParameters
+            PushButtonData pbd3 = new PushButtonData("Add SharedParameters", "Add Shared\rParameters", curAssembly, "PluginForRevit2022.CmdAddSharedParameters");
+            pbd2.ToolTip = "Add Shared parameters short discription";
+            pbd2.LongDescription = "This is Long description of add shared parameters";
+            //pbd1.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "Folders-32.ico"), UriKind.RelativeOrAbsolute));
+            pbd2.LargeImage = Imaging.CreateBitmapSourceFromHIcon(Properties.Resources.Add_SharedParameters.GetHicon(), Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            var pb3 = workPanel.AddItem(pbd3) as PushButton;
+            #endregion
+
             return Result.Succeeded; 
         }
        

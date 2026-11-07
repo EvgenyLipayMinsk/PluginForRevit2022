@@ -66,6 +66,7 @@
     <Compile Include="App.cs" />
     <Compile Include="ArbmAPIElementHelper.cs" />
     <Compile Include="ArbmFamiliesManager.cs" />
+    <Compile Include="CmdAddSharedParameters.cs" />
     <Compile Include="CmdGetLocationOfCategory.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
     <Compile Include="CmdConvertationForRevitVersion.cs" />
@@ -106,5 +107,23 @@
   <ItemGroup>
     <None Include="Resourses\Remove Parameters.png" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Resourses\Add_SharedParameters.png" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Debug: copy the .addin manifest to Revit 2022 and point it at the freshly built DLL -->
+  <PropertyGroup>
+    <RevitAddinsDir>$(APPDATA)\Autodesk\Revit\Addins\2022</RevitAddinsDir>
+  </PropertyGroup>
+  <!-- F5 launches Revit 2022 instead of trying to run the DLL -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <StartAction>Program</StartAction>
+    <StartProgram>C:\Program Files\Autodesk\Revit 2022\Revit.exe</StartProgram>
+  </PropertyGroup>
+  <Target Name="DeployRevitAddin" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+    <MakeDir Directories="$(RevitAddinsDir)" />
+    <Copy SourceFiles="$(ProjectDir)PluginForRevit2022.addin" DestinationFolder="$(RevitAddinsDir)" />
+    <XmlPoke XmlInputPath="$(RevitAddinsDir)\PluginForRevit2022.addin" Query="/RevitAddIns/AddIn/Assembly" Value="$(TargetPath)" />
+    <Message Importance="high" Text="Revit add-in manifest deployed: $(RevitAddinsDir)\PluginForRevit2022.addin" />
+  </Target>
 </Project>

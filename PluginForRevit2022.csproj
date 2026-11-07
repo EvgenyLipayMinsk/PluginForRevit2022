@@ -2,7 +2,7 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug R2022</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}</ProjectGuid>
     <OutputType>Library</OutputType>
@@ -13,32 +13,63 @@
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  <!--
+    One configuration per Revit version. Pick it in the VS toolbar (e.g. "Debug R2023"):
+    the build references that version's RevitAPI, F5 starts that Revit,
+    and a Debug build registers the add-in in %AppData%\Autodesk\Revit\Addins\<version>.
+  -->
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2022|AnyCPU' ">
+    <RevitVersion>2022</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2023|AnyCPU' ">
+    <RevitVersion>2023</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2024|AnyCPU' ">
+    <RevitVersion>2024</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2022|AnyCPU' ">
+    <RevitVersion>2022</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2023|AnyCPU' ">
+    <RevitVersion>2023</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2024|AnyCPU' ">
+    <RevitVersion>2024</RevitVersion>
+  </PropertyGroup>
+  <!-- Settings shared by all versions -->
+  <PropertyGroup>
+    <RevitVersion Condition=" '$(RevitVersion)' == '' ">2022</RevitVersion>
+    <RevitInstallDir>C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitInstallDir>
+    <RevitAddinsDir>$(APPDATA)\Autodesk\Revit\Addins\$(RevitVersion)</RevitAddinsDir>
+    <IsDebugBuild>$(Configuration.StartsWith('Debug'))</IsDebugBuild>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <PlatformTarget>x64</PlatformTarget>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  <PropertyGroup Condition=" '$(IsDebugBuild)' == 'true' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>DEBUG;TRACE;REVIT$(RevitVersion)</DefineConstants>
+    <!-- F5 launches the matching Revit instead of trying to run the DLL -->
+    <StartAction>Program</StartAction>
+    <StartProgram>$(RevitInstallDir)\Revit.exe</StartProgram>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(IsDebugBuild)' != 'true' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+    <DefineConstants>TRACE;REVIT$(RevitVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="RevitAPI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2022\RevitAPI.dll</HintPath>
+      <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="RevitAPIUI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2022\RevitAPIUI.dll</HintPath>
+      <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="System" />
@@ -87,19 +118,15 @@
     <None Include="Resourses\Remove Parameters.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- Debug: copy the .addin manifest to Revit 2022 and point it at the freshly built DLL -->
-  <PropertyGroup>
-    <RevitAddinsDir>$(APPDATA)\Autodesk\Revit\Addins\2022</RevitAddinsDir>
-  </PropertyGroup>
-  <!-- F5 launches Revit 2022 instead of trying to run the DLL -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-    <StartAction>Program</StartAction>
-    <StartProgram>C:\Program Files\Autodesk\Revit 2022\Revit.exe</StartProgram>
-  </PropertyGroup>
-  <Target Name="DeployRevitAddin" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+  <!-- Clear error instead of dozens of "type not found" errors when that Revit is not installed -->
+  <Target Name="CheckRevitApi" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(RevitInstallDir)\RevitAPI.dll')">
+    <Error Text="Revit $(RevitVersion) не найден: нет файла $(RevitInstallDir)\RevitAPI.dll. Установите Revit $(RevitVersion) или выберите другую конфигурацию." />
+  </Target>
+  <!-- Debug: copy the .addin manifest to Addins\<version> and point it at the freshly built DLL -->
+  <Target Name="DeployRevitAddin" AfterTargets="Build" Condition=" '$(IsDebugBuild)' == 'true' ">
     <MakeDir Directories="$(RevitAddinsDir)" />
     <Copy SourceFiles="$(ProjectDir)PluginForRevit2022.addin" DestinationFolder="$(RevitAddinsDir)" />
     <XmlPoke XmlInputPath="$(RevitAddinsDir)\PluginForRevit2022.addin" Query="/RevitAddIns/AddIn/Assembly" Value="$(TargetPath)" />
-    <Message Importance="high" Text="Revit add-in manifest deployed: $(RevitAddinsDir)\PluginForRevit2022.addin" />
+    <Message Importance="high" Text="Revit $(RevitVersion) add-in manifest deployed: $(RevitAddinsDir)\PluginForRevit2022.addin" />
   </Target>
 </Project>

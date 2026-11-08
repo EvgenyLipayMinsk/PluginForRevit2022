@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -63,6 +63,27 @@ namespace PluginForRevit2022.Core
             return result;
         }
 
+        /// <summary>Ответ команды размеров, когда проектировщик ещё не выбрал связи: ничего не создаётся.</summary>
+        public static Dictionary<string, object> LinksRequired(Document doc, string viewName)
+        {
+            List<RevitLinkInstance> all = LoadedLinks(doc);
+            List<string> suggested = all.Where(l => IsArchOrStructural(l.GetLinkDocument().Title)).Select(l => l.Name).ToList();
+            return new Dictionary<string, object>
+            {
+                ["status"] = "links_required",
+                ["view"] = viewName,
+                ["created"] = 0,
+                ["suggestedLinks"] = suggested,
+                ["otherLinks"] = all.Select(l => l.Name).Except(suggested).ToList(),
+                ["message"] = "Ничего не создано. Спросите проектировщика, с какими связями работать, и повторите команду с links; " +
+                              "только с проектом — hostOnly=true. Обычно это связи АР, КР, КЖ (см. suggestedLinks).",
+            };
+        }
+
+        private static bool IsArchOrStructural(string title) =>
+            System.Text.RegularExpressions.Regex.IsMatch(title ?? "", @"(^|[_\-\s.])(АР|КР|КЖ)([_\-\s.\d]|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
         public static ViewPlan RequirePlan(View view)
         {
             if (!(view is ViewPlan plan) || plan.GenLevel == null)
@@ -75,7 +96,7 @@ namespace PluginForRevit2022.Core
         /// <summary>Абсолютные отметки нижней и верхней границ секущего диапазона плана (футы).</summary>
         public static (double bottom, double cut, double top) ViewRangeZ(Document doc, ViewPlan plan)
         {
-            double level = plan.GenLevel.Elevation;
+            double level = plan.GenLevel.ProjectElevation;
             PlanViewRange range = plan.GetViewRange();
 
             double Z(PlanViewPlane plane, double fallback)
@@ -86,7 +107,7 @@ namespace PluginForRevit2022.Core
                 {
                     return fallback;
                 }
-                return ((Level)doc.GetElement(levelId)).Elevation + range.GetOffset(plane);
+                return ((Level)doc.GetElement(levelId)).ProjectElevation + range.GetOffset(plane);
             }
 
             double cut = Z(PlanViewPlane.CutPlane, level + RevitText.ToFeet(1200));

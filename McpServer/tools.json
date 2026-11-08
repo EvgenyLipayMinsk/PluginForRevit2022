@@ -701,16 +701,14 @@
     {
       "name": "dimension_grids",
       "title": "Dimension grids",
-      "description": "Creates chain dimensions between grids on a plan: grids are grouped into parallel families; for each family a chain dimension is placed inside the grid ends (side end/start/both) and optionally an overall dimension between the extreme grids. Grids visible in the view are used; with includeLinks also grids from linked models (when the project has no own grids). dryRun defaults to true.",
+      "description": "Creates chain dimensions between grids on a plan: grids are grouped into parallel families; for each family a chain dimension is placed inside the grid ends (side end/start/both) and optionally an overall dimension between the extreme grids. BEFORE calling, ask the designer which links to work with (usually AR, KR, KJ) and pass them in links, or pass hostOnly=true for project grids only; without either the tool creates nothing and returns status=links_required with suggestedLinks. dryRun defaults to true. Provide view or views. The result reports timing: elapsedMs per view, setupMs and totalElapsedMs.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "view"
-        ],
+        "required": [],
         "properties": {
           "view": {
             "type": "string",
-            "description": "Plan view id or name."
+            "description": "One plan view (id or name). Use this or views."
           },
           "grids": {
             "type": "array",
@@ -718,11 +716,6 @@
               "type": "string"
             },
             "description": "Grid names; empty = all grids in the view."
-          },
-          "includeLinks": {
-            "type": "boolean",
-            "default": false,
-            "description": "Also take grids from linked models: only links listed in links, or all links when the project has fewer than two own grids. Only grids crossing the view crop region are used."
           },
           "side": {
             "type": "string",
@@ -758,28 +751,39 @@
             "items": {
               "type": "string"
             },
-            "description": "Links to take grids from (part of the name), e.g. the AR link."
+            "description": "Links chosen by the designer (part of the name), usually AR/KR/KJ. Only these links are used; all others are ignored."
+          },
+          "hostOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "The designer confirmed working with the project only, without links."
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Several plan views (ids or names) processed in one run. Only the listed views are used; ask the designer which ones. A failed view does not cancel the others."
           }
         }
       },
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false
-      }
+      },
+      "timeoutSeconds": 300
     },
     {
       "name": "dimension_elements",
       "title": "Dimension families to each other and to walls",
-      "description": "Creates dimensions on a plan to family instances (sockets, fixtures, equipment...) in the project or in linked models, measured along the view x or y axis using the family centre reference plane. mode=chain: one chain through all elements (walls=ends adds the nearest wall/structure face at both ends). mode=to_walls: for each element a dimension to the nearest wall/structural column face (walls=nearest) or to both sides (walls=both); walls and columns are found by ray casting, including linked models. Select elements explicitly (elements with id and link name) or by categories visible in the view (categories, nameContains, includeLinks, links). Families rotated off the view axes are skipped. dryRun defaults to true.",
+      "description": "Creates dimensions on a plan to family instances (sockets, fixtures, equipment...), measured along the view x or y axis using the family centre reference plane. mode=chain: one chain through all elements (walls=ends adds the nearest wall/structure face at both ends). mode=to_walls: for each element a dimension to the nearest wall/structural column face (walls=nearest) or to both sides (walls=both). BEFORE calling with walls, ask the designer which links to work with (usually AR, KR, KJ) and pass them in links, or pass hostOnly=true; without either the tool creates nothing and returns status=links_required with suggestedLinks. Walls are searched only in the project and the chosen links. Select elements explicitly (elements with id and link name) or by categories visible in the view (categories, nameContains; linkElements to take them from the chosen links too). Families rotated off the view axes are skipped. dryRun defaults to true. Provide view or views. The result reports timing: elapsedMs per view, setupMs and totalElapsedMs.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "view"
-        ],
+        "required": [],
         "properties": {
           "view": {
             "type": "string",
-            "description": "Plan view id or name."
+            "description": "One plan view (id or name). Use this or views."
           },
           "elements": {
             "type": "array",
@@ -807,17 +811,12 @@
             "type": "string",
             "description": "Only families/types whose name contains this text."
           },
-          "includeLinks": {
-            "type": "boolean",
-            "default": true,
-            "description": "Search walls/structure faces in linked models (default true)."
-          },
           "links": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Take the elements themselves also from these links (part of the name). Empty = only project elements."
+            "description": "Links chosen by the designer (part of the name), usually AR/KR/KJ. Only these links are used; all others are ignored."
           },
           "axis": {
             "type": "string",
@@ -872,13 +871,31 @@
             "type": "boolean",
             "default": true,
             "description": "true = preview only (default); false = create."
+          },
+          "hostOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "The designer confirmed working with the project only, without links."
+          },
+          "linkElements": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also take the dimensioned elements from the links in links. Default: project elements only."
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Several plan views (ids or names) processed in one run. Only the listed views are used; ask the designer which ones. A failed view does not cancel the others."
           }
         }
       },
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false
-      }
+      },
+      "timeoutSeconds": 300
     },
     {
       "name": "list_room_tag_types",
@@ -1235,6 +1252,165 @@
           },
           "name": {
             "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_parameter_values",
+      "title": "Read parameter values",
+      "description": "Reads parameter values of elements: select by ids or categories (optionally only those visible in a view, or from a linked model with link), filter with where-conditions (equals, not_equals, contains, not_contains, begins_with, empty, not_empty, greater, less). For each requested parameter returns the value as shown in Revit, storage type, whether it is a type parameter and read-only. Without parameters (or with listParameterNames) returns the available instance and type parameter names per category. At most 300 elements are returned in detail; total is always reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names (e.g. OST_Doors, Листы, Сведения о проекте)."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "link": {
+            "type": "string",
+            "description": "Read elements from this linked model (part of the name)."
+          },
+          "types": {
+            "type": "boolean",
+            "default": false,
+            "description": "Select element types (типоразмеры) instead of instances."
+          },
+          "where": {
+            "type": "array",
+            "description": "Conditions on parameter values (all must match).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parameter": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameter names to read (instance first, then type)."
+          },
+          "listParameterNames": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also return available parameter names."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "set_parameter_values",
+      "title": "Write parameter values",
+      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "view": {
+            "type": "string"
+          },
+          "types": {
+            "type": "boolean",
+            "default": false
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parameter": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Parameter name -> value for all selected elements."
+          },
+          "items": {
+            "type": "array",
+            "description": "Per-element values.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "allowTypeParameters": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow changing type parameters (affects all instances of the type)."
+          },
+          "maxElements": {
+            "type": "integer",
+            "default": 1000,
+            "description": "Safety limit on the number of elements."
           },
           "dryRun": {
             "type": "boolean",

@@ -114,15 +114,15 @@ class RevitConnection {
     else entry.reject(new Error(message.Error || "Command failed in Revit."));
   }
 
-  async send(commandName, parameters = {}) {
+  async send(commandName, parameters = {}, timeoutMs = COMMAND_TIMEOUT_MS) {
     await this.ensureConnected();
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error(`Revit did not answer '${commandName}' within ${COMMAND_TIMEOUT_MS / 1000} s. ` +
+        reject(new Error(`Revit did not answer '${commandName}' within ${timeoutMs / 1000} s. ` +
           "Revit may be busy or showing a modal dialog."));
-      }, COMMAND_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
       this.socket.send(JSON.stringify({ CommandName: commandName, Parameters: parameters, RequestId: requestId }));
     });
@@ -173,7 +173,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return { isError: true, content: [{ type: "text", text: `Unknown tool: ${request.params.name}` }] };
   }
   try {
-    const data = await revit.send(tool.command || tool.name, prepareArguments(tool, request.params.arguments));
+    const args = prepareArguments(tool, request.params.arguments);
+    // Долгие инструменты задают свой лимит; пакет по видам получает его на каждый вид.
+    const timeoutMs = tool.timeoutSeconds
+      ? tool.timeoutSeconds * 1000 * Math.max(1, Array.isArray(args.views) ? args.views.length : 1)
+      : COMMAND_TIMEOUT_MS;
+    const data = await revit.send(tool.command || tool.name, args, timeoutMs);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   } catch (err) {
     return { isError: true, content: [{ type: "text", text: String(err.message || err) }] };

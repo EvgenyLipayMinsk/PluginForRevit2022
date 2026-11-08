@@ -100,6 +100,7 @@
     <Compile Include="CmdRemoveParameters.cs" />
     <Compile Include="Core\DimensionOperations.cs" />
     <Compile Include="Core\LinkScope.cs" />
+    <Compile Include="Core\ParameterValueOperations.cs" />
     <Compile Include="Core\PlacementOperations.cs" />
     <Compile Include="Core\RoomTagOperations.cs" />
     <Compile Include="Core\ViewGraphicsOperations.cs" />

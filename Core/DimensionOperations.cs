@@ -8,12 +8,14 @@ namespace PluginForRevit2022.Core
     internal sealed class DimensionGridsRequest
     {
         public string View { get; set; }
+        /// <summary>Несколько планов за один запуск (вместо или вместе с View).</summary>
+        public List<string> Views { get; set; } = new List<string>();
         /// <summary>Имена осей; пусто — все оси, видимые на плане.</summary>
         public List<string> Grids { get; set; } = new List<string>();
-        /// <summary>Брать оси также из связанных файлов.</summary>
-        public bool IncludeLinks { get; set; }
-        /// <summary>Из каких связей брать оси (часть имени). Пусто — все, но только если в проекте меньше двух осей.</summary>
+        /// <summary>Связи, выбранные проектировщиком (часть имени). Другие связи не используются.</summary>
         public List<string> Links { get; set; } = new List<string>();
+        /// <summary>Подтверждено: работать только с осями проекта, без связей.</summary>
+        public bool HostOnly { get; set; }
         /// <summary>end — у верхних/правых концов осей, start — у нижних/левых, both — с обеих сторон.</summary>
         public string Side { get; set; } = "both";
         /// <summary>Отступ размерной линии от конца оси внутрь, мм на листе.</summary>
@@ -34,13 +36,19 @@ namespace PluginForRevit2022.Core
     internal sealed class DimensionElementsRequest
     {
         public string View { get; set; }
+        /// <summary>Несколько планов за один запуск (вместо или вместе с View).</summary>
+        public List<string> Views { get; set; } = new List<string>();
         /// <summary>Явный список элементов (в т. ч. из связей).</summary>
         public List<ElementPick> Elements { get; set; } = new List<ElementPick>();
         /// <summary>Или отбор по категориям (OST_* или имя) на виде.</summary>
         public List<string> Categories { get; set; } = new List<string>();
         public string NameContains { get; set; }
-        public bool IncludeLinks { get; set; } = true;
+        /// <summary>Связи, выбранные проектировщиком (часть имени): в них ищутся стены и конструкции.</summary>
         public List<string> Links { get; set; } = new List<string>();
+        /// <summary>Подтверждено: работать только с проектом, без связей.</summary>
+        public bool HostOnly { get; set; }
+        /// <summary>Брать сами образмериваемые элементы также из выбранных связей.</summary>
+        public bool LinkElements { get; set; }
 
         /// <summary>Направление измерения на плане: x (горизонтально) или y (вертикально).</summary>
         public string Axis { get; set; } = "x";
@@ -80,69 +88,74 @@ namespace PluginForRevit2022.Core
 
         public static Dictionary<string, object> DimensionGrids(Document doc, DimensionGridsRequest request)
         {
-            ViewPlan view = LinkScope.RequirePlan(ViewOperations.ResolveView(doc, request.View, ViewType.FloorPlan));
-            var warnings = new List<string>();
-            double z = view.GenLevel.Elevation;
+            List<ViewPlan> views = ResolvePlans(doc, request.View, request.Views);
+            if (request.Links.Count == 0 && !request.HostOnly)
+            {
+                return LinkScope.LinksRequired(doc, string.Join(", ", views.Select(v => v.Name)));
+            }
             DimensionType dimType = ResolveDimensionType(doc, request.DimensionType);
+            return RunOnViews(doc, "AerBIM: размеры между осями", request.DryRun, views, view => GridsOnView(doc, view, request, dimType));
+        }
+
+        private static Dictionary<string, object> GridsOnView(Document doc, ViewPlan view, DimensionGridsRequest request, DimensionType dimType)
+        {
+            var warnings = new List<string>();
+            double z = view.GenLevel.ProjectElevation;
 
             List<GridLine> grids = CollectGrids(doc, view, request, z, warnings);
             if (grids.Count < 2)
             {
                 throw new InvalidOperationException("На плане меньше двух прямых осей для образмеривания." +
-                    (request.IncludeLinks ? "" : " Если оси в связанном файле — includeLinks=true."));
+                    (request.Links.Count > 0 ? "" : " Если оси в связанном файле — укажите links.") +
+                    $" Найдено: {(grids.Count == 0 ? "нет" : string.Join(", ", grids.Select(g => g.Name)))}." +
+                    (warnings.Count > 0 ? " " + string.Join("; ", warnings.Distinct().Take(5)) : ""));
             }
 
             double offset = RevitText.ToFeet(request.OffsetMm) * view.Scale;
             var groups = new List<Dictionary<string, object>>();
             int created = 0;
 
-            using (var transaction = new Transaction(doc, "AerBIM: размеры между осями"))
+            foreach (List<GridLine> family in GroupParallel(grids))
             {
-                transaction.Start();
-                foreach (List<GridLine> family in GroupParallel(grids))
+                if (family.Count < 2)
                 {
-                    if (family.Count < 2)
+                    continue;
+                }
+                XYZ d = family[0].Line.Direction.Normalize();
+                XYZ n = XYZ.BasisZ.CrossProduct(d).Normalize();
+                List<GridLine> sorted = family.OrderBy(g => g.Line.Origin.DotProduct(n)).ToList();
+                double across0 = sorted.First().Line.Origin.DotProduct(n);
+                double across1 = sorted.Last().Line.Origin.DotProduct(n);
+                double endMax = family.Max(g => Math.Max(g.Line.GetEndPoint(0).DotProduct(d), g.Line.GetEndPoint(1).DotProduct(d)));
+                double startMin = family.Min(g => Math.Min(g.Line.GetEndPoint(0).DotProduct(d), g.Line.GetEndPoint(1).DotProduct(d)));
+
+                var sides = new List<(string side, double along, double inward)>();
+                if (request.Side != "start") sides.Add(("end", endMax, -1));
+                if (request.Side != "end") sides.Add(("start", startMin, 1));
+
+                var ids = new List<long>();
+                foreach (var (side, along, inward) in sides)
+                {
+                    double chainAt = along + inward * offset;
+                    Dimension chain = Create(doc, view, d, n, chainAt, across0, across1, z, sorted.Select(g => g.Reference), dimType, warnings);
+                    if (chain != null) { ids.Add(RevitIds.IdOf(chain.Id)); created++; }
+
+                    if (request.Overall && sorted.Count > 2)
                     {
-                        continue;
+                        double overallAt = along + inward * offset * 2;
+                        Dimension overall = Create(doc, view, d, n, overallAt, across0, across1, z,
+                            new[] { sorted.First().Reference, sorted.Last().Reference }, dimType, warnings);
+                        if (overall != null) { ids.Add(RevitIds.IdOf(overall.Id)); created++; }
                     }
-                    XYZ d = family[0].Line.Direction.Normalize();
-                    XYZ n = XYZ.BasisZ.CrossProduct(d).Normalize();
-                    List<GridLine> sorted = family.OrderBy(g => g.Line.Origin.DotProduct(n)).ToList();
-                    double across0 = sorted.First().Line.Origin.DotProduct(n);
-                    double across1 = sorted.Last().Line.Origin.DotProduct(n);
-                    double endMax = family.Max(g => Math.Max(g.Line.GetEndPoint(0).DotProduct(d), g.Line.GetEndPoint(1).DotProduct(d)));
-                    double startMin = family.Min(g => Math.Min(g.Line.GetEndPoint(0).DotProduct(d), g.Line.GetEndPoint(1).DotProduct(d)));
-
-                    var sides = new List<(string side, double along, double inward)>();
-                    if (request.Side != "start") sides.Add(("end", endMax, -1));
-                    if (request.Side != "end") sides.Add(("start", startMin, 1));
-
-                    var ids = new List<long>();
-                    foreach (var (side, along, inward) in sides)
-                    {
-                        double chainAt = along + inward * offset;
-                        Dimension chain = Create(doc, view, d, n, chainAt, across0, across1, z, sorted.Select(g => g.Reference), dimType, warnings);
-                        if (chain != null) { ids.Add(RevitIds.IdOf(chain.Id)); created++; }
-
-                        if (request.Overall && sorted.Count > 2)
-                        {
-                            double overallAt = along + inward * offset * 2;
-                            Dimension overall = Create(doc, view, d, n, overallAt, across0, across1, z,
-                                new[] { sorted.First().Reference, sorted.Last().Reference }, dimType, warnings);
-                            if (overall != null) { ids.Add(RevitIds.IdOf(overall.Id)); created++; }
-                        }
-                    }
-
-                    groups.Add(new Dictionary<string, object>
-                    {
-                        ["grids"] = sorted.Select(g => g.Name).ToList(),
-                        ["source"] = sorted.Select(g => g.Source).Distinct().ToList(),
-                        ["spanMm"] = RevitText.ToMm(across1 - across0),
-                        ["dimensionIds"] = request.DryRun ? new List<long>() : ids,
-                    });
                 }
 
-                Finish(transaction, request.DryRun, created);
+                groups.Add(new Dictionary<string, object>
+                {
+                    ["grids"] = sorted.Select(g => g.Name).ToList(),
+                    ["source"] = sorted.Select(g => g.Source).Distinct().ToList(),
+                    ["spanMm"] = RevitText.ToMm(across1 - across0),
+                    ["dimensionIds"] = request.DryRun ? new List<long>() : ids,
+                });
             }
 
             return new Dictionary<string, object>
@@ -175,23 +188,9 @@ namespace PluginForRevit2022.Core
                 }
             }
 
-            if (request.IncludeLinks)
+            if (!request.HostOnly && request.Links.Count > 0)
             {
-                List<RevitLinkInstance> links;
-                if (request.Links.Count > 0)
-                {
-                    links = LinkScope.ResolveLinks(doc, request.Links, warnings);
-                }
-                else if (result.Count < 2)
-                {
-                    links = LinkScope.LoadedLinks(doc);
-                    warnings.Add("связи не указаны: оси взяты из всех связей — лучше указать links (например, связь АР)");
-                }
-                else
-                {
-                    links = new List<RevitLinkInstance>();
-                    warnings.Add("в проекте есть свои оси: оси связей не используются (укажите links, чтобы взять их)");
-                }
+                List<RevitLinkInstance> links = LinkScope.ResolveLinks(doc, request.Links, warnings);
 
                 var geometryOptions = new Options { ComputeReferences = true, IncludeNonVisibleObjects = true };
                 foreach (RevitLinkInstance link in links)
@@ -259,9 +258,43 @@ namespace PluginForRevit2022.Core
 
         public static Dictionary<string, object> DimensionElements(Document doc, DimensionElementsRequest request)
         {
-            ViewPlan view = LinkScope.RequirePlan(ViewOperations.ResolveView(doc, request.View, ViewType.FloorPlan));
-            var warnings = new List<string>();
+            List<ViewPlan> views = ResolvePlans(doc, request.View, request.Views);
+            string requestedMode = (request.Mode ?? "chain").Trim().ToLowerInvariant();
+            string requestedWalls = (request.Walls ?? "nearest").Trim().ToLowerInvariant();
+            bool needWalls = requestedMode == "to_walls" || requestedWalls == "ends";
+            if (request.Links.Count == 0 && !request.HostOnly && (needWalls || request.LinkElements))
+            {
+                return LinkScope.LinksRequired(doc, string.Join(", ", views.Select(v => v.Name)));
+            }
+
+            var linkWarnings = new List<string>();
+            List<RevitLinkInstance> selectedLinks = request.HostOnly || request.Links.Count == 0
+                ? new List<RevitLinkInstance>()
+                : LinkScope.ResolveLinks(doc, request.Links, linkWarnings);
             DimensionType dimType = ResolveDimensionType(doc, request.DimensionType);
+
+            // Временный 3D-вид и настройка его видимости — один раз на весь запуск.
+            View3D probe = null;
+            WallFinder finder = null;
+            return RunOnViews(doc, "AerBIM: размеры до элементов", request.DryRun, views,
+                view => ElementsOnView(doc, view, request, dimType, finder, linkWarnings),
+                () =>
+                {
+                    if (!needWalls) return;
+                    probe = LinkScope.CreateProbe3D(doc);
+                    List<ElementId> wallCats = request.WallCategories.Select(c => CategoryId(doc, c)).Where(c => c != null).ToList();
+                    finder = new WallFinder(doc, probe, wallCats, selectedLinks);
+                },
+                () =>
+                {
+                    if (probe != null) doc.Delete(probe.Id);
+                });
+        }
+
+        private static Dictionary<string, object> ElementsOnView(Document doc, ViewPlan view, DimensionElementsRequest request,
+                                                                 DimensionType dimType, WallFinder intersector, List<string> linkWarnings)
+        {
+            var warnings = new List<string>(linkWarnings);
             string axis = (request.Axis ?? "x").Trim().ToLowerInvariant();
             if (axis != "x" && axis != "y")
             {
@@ -270,7 +303,7 @@ namespace PluginForRevit2022.Core
             XYZ a = axis == "x" ? view.RightDirection.Normalize() : view.UpDirection.Normalize();   // вдоль размера
             XYZ b = axis == "x" ? view.UpDirection.Normalize() : view.RightDirection.Normalize();   // поперёк
             var (bottomZ, cutZ, topZ) = LinkScope.ViewRangeZ(doc, view);
-            double z = view.GenLevel.Elevation;
+            double z = view.GenLevel.ProjectElevation;
             double offset = RevitText.ToFeet(request.OffsetMm) * view.Scale;
             string mode = (request.Mode ?? "chain").Trim().ToLowerInvariant();
             string walls = (request.Walls ?? "nearest").Trim().ToLowerInvariant();
@@ -280,7 +313,7 @@ namespace PluginForRevit2022.Core
             {
                 throw new InvalidOperationException(
                     $"На виде «{view.Name}» не найдено элементов категорий: {string.Join(", ", request.Categories)}" +
-                    (request.Links.Count == 0 ? " (в проекте; элементы из связей — укажите links)." : "."));
+                    (request.LinkElements ? "." : " (в проекте; элементы из выбранных связей — linkElements=true)."));
             }
             var targets = new List<Target>();
             foreach (ScopedElement item in items)
@@ -296,97 +329,75 @@ namespace PluginForRevit2022.Core
 
             var created = new List<long>();
             var details = new List<Dictionary<string, object>>();
-            using (var transaction = new Transaction(doc, "AerBIM: размеры до элементов"))
-            {
-                transaction.Start();
-                View3D probe = null;
-                ReferenceIntersector intersector = null;
-                bool needWalls = mode == "to_walls" || walls == "ends";
-                if (needWalls)
-                {
-                    probe = LinkScope.CreateProbe3D(doc);
-                    List<ElementId> wallCats = request.WallCategories.Select(c => CategoryId(doc, c)).Where(c => c != null).ToList();
-                    intersector = new ReferenceIntersector(new ElementMulticategoryFilter(wallCats), FindReferenceTarget.Face, probe)
-                    {
-                        FindReferencesInRevitLinks = request.IncludeLinks,
-                    };
-                }
-                double maxDistance = RevitText.ToFeet(request.MaxWallDistanceMm);
+            double maxDistance = RevitText.ToFeet(request.MaxWallDistanceMm);
 
-                if (mode == "chain")
+            if (mode == "chain")
+            {
+                List<Target> sorted = targets.OrderBy(t => t.Point.DotProduct(a)).ToList();
+                var refs = sorted.Select(t => t.Reference).ToList();
+                double from = sorted.First().Point.DotProduct(a);
+                double to = sorted.Last().Point.DotProduct(a);
+                if (walls == "ends" && intersector != null)
                 {
-                    List<Target> sorted = targets.OrderBy(t => t.Point.DotProduct(a)).ToList();
-                    var refs = sorted.Select(t => t.Reference).ToList();
-                    double from = sorted.First().Point.DotProduct(a);
-                    double to = sorted.Last().Point.DotProduct(a);
-                    if (walls == "ends" && intersector != null)
+                    var (startRef, startDist) = NearestFace(intersector, sorted.First().Point, cutZ, a.Negate(), maxDistance);
+                    var (endRef, endDist) = NearestFace(intersector, sorted.Last().Point, cutZ, a, maxDistance);
+                    if (startRef != null) { refs.Insert(0, startRef); from -= startDist; } else warnings.Add("слева/снизу от цепочки стена не найдена");
+                    if (endRef != null) { refs.Add(endRef); to += endDist; } else warnings.Add("справа/сверху от цепочки стена не найдена");
+                }
+                if (refs.Count < 2)
+                {
+                    throw new InvalidOperationException("Для цепочки нужно минимум два элемента (или элемент и стена: walls=ends).");
+                }
+                double at = sorted.Max(t => t.Point.DotProduct(b)) + offset;
+                Dimension dim = Create(doc, view, b, a, at, from, to, z, refs, dimType, warnings);
+                if (dim != null) created.Add(RevitIds.IdOf(dim.Id));
+                details.Add(new Dictionary<string, object> { ["mode"] = "chain", ["elements"] = sorted.Count, ["references"] = refs.Count });
+            }
+            else if (mode == "to_walls")
+            {
+                foreach (Target t in targets)
+                {
+                    var (minusRef, minusDist) = NearestFace(intersector, t.Point, cutZ, a.Negate(), maxDistance);
+                    var (plusRef, plusDist) = NearestFace(intersector, t.Point, cutZ, a, maxDistance);
+                    var refs = new List<Reference>();
+                    double p = t.Point.DotProduct(a);
+                    double from = p, to = p;
+                    if (walls == "both")
                     {
-                        var (startRef, startDist) = NearestFace(intersector, sorted.First().Point, cutZ, a.Negate(), maxDistance);
-                        var (endRef, endDist) = NearestFace(intersector, sorted.Last().Point, cutZ, a, maxDistance);
-                        if (startRef != null) { refs.Insert(0, startRef); from -= startDist; } else warnings.Add("слева/снизу от цепочки стена не найдена");
-                        if (endRef != null) { refs.Add(endRef); to += endDist; } else warnings.Add("справа/сверху от цепочки стена не найдена");
+                        if (minusRef != null) { refs.Add(minusRef); from = p - minusDist; }
+                        refs.Add(t.Reference);
+                        if (plusRef != null) { refs.Add(plusRef); to = p + plusDist; }
                     }
+                    else
+                    {
+                        bool useMinus = minusRef != null && (plusRef == null || minusDist <= plusDist);
+                        if (useMinus) { refs.Add(minusRef); refs.Add(t.Reference); from = p - minusDist; }
+                        else if (plusRef != null) { refs.Add(t.Reference); refs.Add(plusRef); to = p + plusDist; }
+                    }
+
+                    var detail = new Dictionary<string, object> { ["element"] = t.Item.ToDictionary() };
                     if (refs.Count < 2)
                     {
-                        throw new InvalidOperationException("Для цепочки нужно минимум два элемента (или элемент и стена: walls=ends).");
+                        detail["status"] = "no_wall";
+                        warnings.Add($"«{t.Item.Element.Name}» (id {RevitIds.IdOf(t.Item.Element.Id)}): стена/конструкция в пределах {request.MaxWallDistanceMm} мм не найдена");
                     }
-                    double at = sorted.Max(t => t.Point.DotProduct(b)) + offset;
-                    Dimension dim = Create(doc, view, b, a, at, from, to, z, refs, dimType, warnings);
-                    if (dim != null) created.Add(RevitIds.IdOf(dim.Id));
-                    details.Add(new Dictionary<string, object> { ["mode"] = "chain", ["elements"] = sorted.Count, ["references"] = refs.Count });
-                }
-                else if (mode == "to_walls")
-                {
-                    foreach (Target t in targets)
+                    else
                     {
-                        var (minusRef, minusDist) = NearestFace(intersector, t.Point, cutZ, a.Negate(), maxDistance);
-                        var (plusRef, plusDist) = NearestFace(intersector, t.Point, cutZ, a, maxDistance);
-                        var refs = new List<Reference>();
-                        double p = t.Point.DotProduct(a);
-                        double from = p, to = p;
-                        if (walls == "both")
+                        double at = t.Point.DotProduct(b) + offset;
+                        Dimension dim = Create(doc, view, b, a, at, from, to, z, refs, dimType, warnings);
+                        detail["status"] = dim == null ? "failed" : "created";
+                        if (dim != null)
                         {
-                            if (minusRef != null) { refs.Add(minusRef); from = p - minusDist; }
-                            refs.Add(t.Reference);
-                            if (plusRef != null) { refs.Add(plusRef); to = p + plusDist; }
+                            created.Add(RevitIds.IdOf(dim.Id));
+                            detail["distanceMm"] = RevitText.ToMm(Math.Min(useMin(minusRef, minusDist), useMin(plusRef, plusDist)));
                         }
-                        else
-                        {
-                            bool useMinus = minusRef != null && (plusRef == null || minusDist <= plusDist);
-                            if (useMinus) { refs.Add(minusRef); refs.Add(t.Reference); from = p - minusDist; }
-                            else if (plusRef != null) { refs.Add(t.Reference); refs.Add(plusRef); to = p + plusDist; }
-                        }
-
-                        var detail = new Dictionary<string, object> { ["element"] = t.Item.ToDictionary() };
-                        if (refs.Count < 2)
-                        {
-                            detail["status"] = "no_wall";
-                            warnings.Add($"«{t.Item.Element.Name}» (id {RevitIds.IdOf(t.Item.Element.Id)}): стена/конструкция в пределах {request.MaxWallDistanceMm} мм не найдена");
-                        }
-                        else
-                        {
-                            double at = t.Point.DotProduct(b) + offset;
-                            Dimension dim = Create(doc, view, b, a, at, from, to, z, refs, dimType, warnings);
-                            detail["status"] = dim == null ? "failed" : "created";
-                            if (dim != null)
-                            {
-                                created.Add(RevitIds.IdOf(dim.Id));
-                                detail["distanceMm"] = RevitText.ToMm(Math.Min(useMin(minusRef, minusDist), useMin(plusRef, plusDist)));
-                            }
-                        }
-                        details.Add(detail);
                     }
+                    details.Add(detail);
                 }
-                else
-                {
-                    throw new ArgumentException("mode: chain или to_walls.");
-                }
-
-                if (probe != null)
-                {
-                    doc.Delete(probe.Id);
-                }
-                Finish(transaction, request.DryRun, created.Count);
+            }
+            else
+            {
+                throw new ArgumentException("mode: chain или to_walls.");
             }
 
             return new Dictionary<string, object>
@@ -411,9 +422,10 @@ namespace PluginForRevit2022.Core
                                                            double bottomZ, double topZ, List<string> warnings)
         {
             var result = new List<ScopedElement>();
-            // Элементы из связей берутся только из явно указанных связей (links);
-            // includeLinks управляет поиском стен/конструкций в связях.
-            List<RevitLinkInstance> links = request.Links.Count > 0 ? LinkScope.ResolveLinks(doc, request.Links, warnings) : new List<RevitLinkInstance>();
+            // Сами элементы берутся из выбранных связей только по явному linkElements=true.
+            List<RevitLinkInstance> links = request.LinkElements && request.Links.Count > 0
+                ? LinkScope.ResolveLinks(doc, request.Links, warnings)
+                : new List<RevitLinkInstance>();
 
             if (request.Elements.Count > 0)
             {
@@ -506,15 +518,94 @@ namespace PluginForRevit2022.Core
             return new Target { Item = item, Point = item.Transform.OfPoint(local), Reference = reference };
         }
 
-        private static (Reference reference, double distance) NearestFace(ReferenceIntersector intersector, XYZ point, double z, XYZ direction, double maxDistance)
+        private static (Reference reference, double distance) NearestFace(WallFinder finder, XYZ point, double z, XYZ direction, double maxDistance) =>
+            finder.Nearest(point, z, direction, maxDistance);
+
+        /// <summary>
+        /// Поиск ближайшей грани стены/конструкции лучом, включая связанные файлы.
+        /// Фильтр ReferenceIntersector применяется к элементам текущего проекта, поэтому
+        /// для связей он должен пропускать сам RevitLinkInstance, а категория найденного
+        /// элемента проверяется уже в документе связи.
+        /// </summary>
+        private sealed class WallFinder
         {
-            var origin = new XYZ(point.X, point.Y, z);
-            ReferenceWithContext hit = intersector.FindNearest(origin, direction);
-            if (hit == null || hit.Proximity > maxDistance || hit.Proximity < 1e-4)
+            private readonly Document _doc;
+            private readonly HashSet<long> _categories;
+            private readonly ReferenceIntersector _intersector;
+            private readonly HashSet<long> _links;
+
+            public WallFinder(Document doc, View3D view, List<ElementId> categories, List<RevitLinkInstance> links)
             {
+                _doc = doc;
+                _links = new HashSet<long>(links.Select(l => RevitIds.IdOf(l.Id)));
+                bool includeLinks = links.Count > 0;
+                _categories = new HashSet<long>(categories.Select(RevitIds.IdOf));
+                ElementFilter filter = new ElementMulticategoryFilter(categories);
+                LimitProbeView(doc, view, categories, links);
+                if (includeLinks)
+                {
+                    filter = new LogicalOrFilter(filter, new ElementClassFilter(typeof(RevitLinkInstance)));
+                }
+                _intersector = new ReferenceIntersector(filter, FindReferenceTarget.Face, view)
+                {
+                    FindReferencesInRevitLinks = includeLinks,
+                };
+            }
+
+            /// <summary>
+            /// Луч учитывает видимость 3D-вида: скрываем всё, кроме нужных категорий, и связи, не выбранные проектировщиком.
+            /// Иначе он проверяет геометрию всех связей (в крупном проекте — минуты на элемент).
+            /// </summary>
+            private static void LimitProbeView(Document doc, View3D view, List<ElementId> categories, List<RevitLinkInstance> links)
+            {
+                var keep = new HashSet<long>(categories.Select(RevitIds.IdOf)) { (long)BuiltInCategory.OST_RvtLinks };
+                foreach (Category category in doc.Settings.Categories)
+                {
+                    if (category.CategoryType == CategoryType.Model && !keep.Contains(RevitIds.IdOf(category.Id)) &&
+                        view.CanCategoryBeHidden(category.Id))
+                    {
+                        view.SetCategoryHidden(category.Id, true);
+                    }
+                }
+
+                var selected = new HashSet<long>(links.Select(l => RevitIds.IdOf(l.Id)));
+                List<ElementId> others = LinkScope.LoadedLinks(doc)
+                    .Where(l => !selected.Contains(RevitIds.IdOf(l.Id)) && l.CanBeHidden(view))
+                    .Select(l => l.Id).ToList();
+                if (others.Count > 0) view.HideElements(others);
+            }
+
+            public (Reference reference, double distance) Nearest(XYZ point, double z, XYZ direction, double maxDistance)
+            {
+                var origin = new XYZ(point.X, point.Y, z);
+                foreach (ReferenceWithContext hit in _intersector.Find(origin, direction).OrderBy(h => h.Proximity))
+                {
+                    if (hit.Proximity < 1e-4) continue;
+                    if (hit.Proximity > maxDistance) break;
+                    Reference reference = hit.GetReference();
+                    if (IsWall(reference))
+                    {
+                        return (reference, hit.Proximity);
+                    }
+                }
                 return (null, 0);
             }
-            return (hit.GetReference(), hit.Proximity);
+
+            private bool IsWall(Reference reference)
+            {
+                Element element;
+                if (reference.LinkedElementId != ElementId.InvalidElementId)
+                {
+                    if (!_links.Contains(RevitIds.IdOf(reference.ElementId))) return false;
+                    var link = _doc.GetElement(reference.ElementId) as RevitLinkInstance;
+                    element = link?.GetLinkDocument()?.GetElement(reference.LinkedElementId);
+                }
+                else
+                {
+                    element = _doc.GetElement(reference.ElementId);
+                }
+                return element?.Category != null && _categories.Contains(RevitIds.IdOf(element.Category.Id));
+            }
         }
 
         // ===================== Общие =====================
@@ -611,6 +702,81 @@ namespace PluginForRevit2022.Core
             Category category = doc.Settings.Categories.Cast<Category>()
                 .FirstOrDefault(c => string.Equals(c.Name, v, StringComparison.CurrentCultureIgnoreCase));
             return category?.Id;
+        }
+
+        /// <summary>Планы по id или имени: все проверяются до начала работы, повторы убираются.</summary>
+        private static List<ViewPlan> ResolvePlans(Document doc, string single, List<string> many)
+        {
+            var names = new List<string>(many ?? new List<string>());
+            if (!string.IsNullOrWhiteSpace(single)) names.Insert(0, single);
+            if (names.Count == 0)
+            {
+                throw new ArgumentException("Укажите view или views (id или имена планов). Список: list_views.");
+            }
+            return names.Select(n => LinkScope.RequirePlan(ViewOperations.ResolveView(doc, n, ViewType.FloorPlan)))
+                .GroupBy(p => RevitIds.IdOf(p.Id)).Select(g => g.First()).ToList();
+        }
+
+        /// <summary>
+        /// Выполняет работу по планам в одной транзакции. При нескольких планах сбой одного не отменяет остальные
+        /// (подтранзакция на план); при одном плане ошибка возвращается как обычно. В ответе — время работы, мс.
+        /// </summary>
+        private static Dictionary<string, object> RunOnViews(Document doc, string title, bool dryRun, List<ViewPlan> views,
+                                                             Func<ViewPlan, Dictionary<string, object>> work,
+                                                             Action start = null, Action end = null)
+        {
+            var total = System.Diagnostics.Stopwatch.StartNew();
+            var results = new List<Dictionary<string, object>>();
+            int created = 0;
+            long setupMs;
+            using (var transaction = new Transaction(doc, title))
+            {
+                transaction.Start();
+                start?.Invoke();
+                setupMs = total.ElapsedMilliseconds;
+                foreach (ViewPlan view in views)
+                {
+                    var timer = System.Diagnostics.Stopwatch.StartNew();
+                    Dictionary<string, object> result;
+                    try
+                    {
+                        using (var sub = new SubTransaction(doc))
+                        {
+                            sub.Start();
+                            result = work(view);
+                            sub.Commit();
+                        }
+                        result["status"] = "ok";
+                    }
+                    catch (Exception ex) when (views.Count > 1)
+                    {
+                        result = new Dictionary<string, object> { ["view"] = view.Name, ["status"] = "failed", ["created"] = 0, ["error"] = ex.Message };
+                    }
+                    result["elapsedMs"] = timer.ElapsedMilliseconds;
+                    created += (int)result["created"];
+                    results.Add(result);
+                }
+                end?.Invoke();
+                Finish(transaction, dryRun, created);
+            }
+
+            if (views.Count == 1)
+            {
+                results[0]["setupMs"] = setupMs;
+                results[0]["totalElapsedMs"] = total.ElapsedMilliseconds;
+                return results[0];
+            }
+            return new Dictionary<string, object>
+            {
+                ["dryRun"] = dryRun,
+                ["views"] = views.Count,
+                ["failed"] = results.Count(r => (string)r["status"] == "failed"),
+                ["created"] = created,
+                ["setupMs"] = setupMs,
+                ["totalElapsedMs"] = total.ElapsedMilliseconds,
+                ["results"] = results,
+                ["summary"] = Summary(dryRun, created),
+            };
         }
 
         private static void Finish(Transaction transaction, bool dryRun, int created)

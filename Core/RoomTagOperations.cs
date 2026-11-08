@@ -61,8 +61,12 @@ namespace PluginForRevit2022.Core
                 foreach (var (link, source, transform) in sources)
                 {
                     int found = 0, already = 0, otherLevel = 0, outside = 0, unplaced = 0, failed = 0, made = 0;
-                    foreach (Room room in new FilteredElementCollector(source).OfCategory(BuiltInCategory.OST_Rooms)
-                                 .WhereElementIsNotElementType().OfType<Room>())
+                    var levelStats = new Dictionary<string, (int count, double bottom, double top)>();
+                    // Список собирается заранее: создание марок меняет базу и ломает «ленивый» коллектор.
+                    List<Room> rooms = new FilteredElementCollector(source).OfCategory(BuiltInCategory.OST_Rooms)
+                        .WhereElementIsNotElementType().OfType<Room>().ToList();
+
+                    foreach (Room room in rooms)
                     {
                         if (room.Area <= 0 || !(room.Location is LocationPoint location))
                         {
@@ -71,20 +75,20 @@ namespace PluginForRevit2022.Core
                         }
 
                         XYZ point = transform.OfPoint(location.Point);
-                        bool levelOk;
-                        if (!string.IsNullOrWhiteSpace(request.RoomLevel))
-                        {
-                            levelOk = string.Equals(room.Level?.Name, request.RoomLevel.Trim(), StringComparison.CurrentCultureIgnoreCase);
-                        }
-                        else
-                        {
+                        BoundingBoxXYZ volume = room.get_BoundingBox(null);
+                        double bottom = volume != null ? transform.OfPoint(volume.Min).Z : point.Z;
+                        double top = volume != null ? transform.OfPoint(volume.Max).Z : bottom;
+
+                        string levelName = room.Level?.Name ?? "—";
+                        levelStats[levelName] = levelStats.TryGetValue(levelName, out var s)
+                            ? (s.count + 1, Math.Min(s.bottom, bottom), Math.Max(s.top, top))
+                            : (1, bottom, top);
+
+                        bool levelOk = !string.IsNullOrWhiteSpace(request.RoomLevel)
+                            ? string.Equals(levelName, request.RoomLevel.Trim(), StringComparison.CurrentCultureIgnoreCase)
                             // Помещение на плане, если секущая плоскость плана проходит через его объём
                             // (уровень плана может не совпадать с уровнем АР: например, «над фальшполом»).
-                            BoundingBoxXYZ volume = room.get_BoundingBox(null);
-                            double bottom = volume != null ? transform.OfPoint(volume.Min).Z : transform.OfPoint(location.Point).Z;
-                            double top = volume != null ? transform.OfPoint(volume.Max).Z : bottom;
-                            levelOk = cutZ >= bottom - tolerance && cutZ <= top + tolerance;
-                        }
+                            : cutZ >= bottom - tolerance && cutZ <= top + tolerance;
                         if (!levelOk)
                         {
                             otherLevel++;
@@ -147,6 +151,15 @@ namespace PluginForRevit2022.Core
                         ["otherLevels"] = otherLevel,
                         ["notPlaced"] = unplaced,
                         ["failed"] = failed,
+                        // Диагностика: уровни помещений источника и их высотный диапазон
+                        // (абсолютные отметки во внутренних координатах проекта) — сравнить с cutPlaneMm.
+                        ["roomLevels"] = levelStats.OrderBy(l => l.Value.bottom).Select(l => new Dictionary<string, object>
+                        {
+                            ["level"] = l.Key,
+                            ["rooms"] = l.Value.count,
+                            ["bottomMm"] = RevitText.ToMm(l.Value.bottom),
+                            ["topMm"] = RevitText.ToMm(l.Value.top),
+                        }).ToList(),
                     });
                 }
 
@@ -180,6 +193,7 @@ namespace PluginForRevit2022.Core
                 ["level"] = view.GenLevel.Name,
                 ["tagType"] = tagType == null ? "по умолчанию" : $"{tagType.FamilyName} : {tagType.Name}",
                 ["created"] = created,
+                ["cutPlaneMm"] = RevitText.ToMm(cutZ),
                 ["sources"] = perSource,
                 ["warnings"] = warnings.Distinct().Take(50).ToList(),
                 ["summary"] = request.DryRun

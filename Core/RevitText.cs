@@ -33,9 +33,11 @@ namespace PluginForRevit2022.Core
         /// Записывает значение параметра из текста. Возвращает null при успехе, иначе текст предупреждения.
         /// Числа с единицами («5000», «5 м») передаются Revit через SetValueString.
         /// </summary>
-        public static string TrySet(Element element, string parameterName, string value)
+        public static string TrySet(Element element, string parameterName, string value) =>
+            TrySet(element.LookupParameter(parameterName), parameterName, value);
+
+        public static string TrySet(Parameter parameter, string parameterName, string value)
         {
-            Parameter parameter = element.LookupParameter(parameterName);
             if (parameter == null)
             {
                 return $"параметр «{parameterName}» не найден";

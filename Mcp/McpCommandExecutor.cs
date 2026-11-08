@@ -71,8 +71,10 @@ namespace PluginForRevit2022.Mcp
             Register("dimension_grids", (app, args) => DimensionOperations.DimensionGrids(ActiveProject(app), new DimensionGridsRequest
             {
                 View = args.String("view"),
+                Views = args.StringList("views"),
                 Grids = args.StringList("grids"),
-                IncludeLinks = args.Bool("includeLinks") ?? false,
+                Links = args.StringList("links"),
+                HostOnly = args.Bool("hostOnly") ?? false,
                 Side = args.String("side") ?? "both",
                 OffsetMm = args.Double("offsetMm") ?? 10,
                 Overall = args.Bool("overall") ?? true,
@@ -84,11 +86,13 @@ namespace PluginForRevit2022.Mcp
                 var request = new DimensionElementsRequest
                 {
                     View = args.String("view"),
+                    Views = args.StringList("views"),
                     Elements = args.ObjectList("elements").Select(e => new ElementPick { Id = e.Long("id") ?? 0, Link = e.String("link") }).ToList(),
                     Categories = args.StringList("categories"),
                     NameContains = args.String("nameContains"),
-                    IncludeLinks = args.Bool("includeLinks") ?? true,
                     Links = args.StringList("links"),
+                    HostOnly = args.Bool("hostOnly") ?? false,
+                    LinkElements = args.Bool("linkElements") ?? false,
                     Axis = args.String("axis") ?? "x",
                     Mode = args.String("mode") ?? "chain",
                     Walls = args.String("walls") ?? (string.Equals(args.String("mode"), "to_walls", StringComparison.OrdinalIgnoreCase) ? "nearest" : "none"),
@@ -184,7 +188,41 @@ namespace PluginForRevit2022.Mcp
             }));
             Register("create_view_template", (app, args) =>
                 ViewGraphicsOperations.CreateTemplateFromView(ActiveProject(app), args.String("view"), args.String("name"), args.Bool("dryRun") ?? true));
+
+            // Значения параметров
+            Register("get_parameter_values", (app, args) => ParameterValueOperations.Get(
+                ActiveProject(app), ToSelection(args), args.StringList("parameters"), args.Bool("listParameterNames") ?? false));
+            Register("set_parameter_values", (app, args) =>
+            {
+                var request = new SetValuesRequest
+                {
+                    Selection = ToSelection(args),
+                    Values = args.StringMap("values"),
+                    Items = args.ObjectList("items")
+                        .Select(i => (i.Long("id") ?? 0, i.StringMap("values")))
+                        .ToList(),
+                    AllowTypeParameters = args.Bool("allowTypeParameters") ?? false,
+                    MaxElements = args.Int("maxElements") ?? 1000,
+                    DryRun = args.Bool("dryRun") ?? true,
+                };
+                return ParameterValueOperations.Set(ActiveProject(app), request);
+            });
         }
+
+        private static ElementSelection ToSelection(McpArgs args) => new ElementSelection
+        {
+            Ids = args.StringList("ids").Select(long.Parse).ToList(),
+            Categories = args.StringList("categories"),
+            View = args.String("view"),
+            Link = args.String("link"),
+            Types = args.Bool("types") ?? false,
+            Where = args.ObjectList("where").Select(w => new ValueCondition
+            {
+                Parameter = w.String("parameter"),
+                Operator = w.String("operator") ?? "equals",
+                Value = w.String("value"),
+            }).ToList(),
+        };
 
         public static IEnumerable<string> CommandNames => Commands.Keys;
 

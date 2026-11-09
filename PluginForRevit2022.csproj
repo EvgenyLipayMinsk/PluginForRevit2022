@@ -92,11 +92,42 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="WindowsBase" />
+    <Reference Include="EPPlus, Version=8.5.4.0">
+      <HintPath>packages\EPPlus.8.5.4\lib\net462\EPPlus.dll</HintPath>
+    </Reference>
+    <Reference Include="EPPlus.Interfaces, Version=8.4.0.0">
+      <HintPath>packages\EPPlus.Interfaces.8.4.0\lib\net462\EPPlus.Interfaces.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.IO.RecyclableMemoryStream">
+      <HintPath>packages\Microsoft.IO.RecyclableMemoryStream.3.0.1\lib\netstandard2.0\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>packages\System.Buffers.4.5.1\lib\net461\System.Buffers.dll</HintPath>
+    </Reference>
+    <Reference Include="System.ComponentModel.Annotations">
+      <HintPath>packages\System.ComponentModel.Annotations.5.0.0\lib\net461\System.ComponentModel.Annotations.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>packages\System.Memory.4.5.5\lib\net461\System.Memory.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Security.Cryptography.Xml">
+      <HintPath>packages\System.Security.Cryptography.Xml.8.0.3\lib\net462\System.Security.Cryptography.Xml.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
     <Compile Include="CmdAddSharedParameters.cs" />
     <Compile Include="CmdMcp.cs" />
+    <Compile Include="CmdMarkDevices.cs" />
+    <Compile Include="CmdGuarded.cs" />
+    <Compile Include="CmdMarkingSettings.cs" />
+    <Compile Include="CmdPlaceDetectors.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
     <Compile Include="Core\DimensionOperations.cs" />
     <Compile Include="Core\LinkScope.cs" />
@@ -113,6 +144,50 @@
     <Compile Include="Core\SheetLayoutOperations.cs" />
     <Compile Include="Core\SheetOperations.cs" />
     <Compile Include="Core\ViewOperations.cs" />
+    <Compile Include="Core\DeviceMarkingOperations.cs" />
+    <Compile Include="Core\MarkingSettings.cs" />
+    <Compile Include="Core\DetectorPlacementOperations.cs" />
+    <Compile Include="Core\PluginParameterCheck.cs" />
+    <Compile Include="Core\CableJournalOperations.cs" />
+    <Compile Include="Core\CableJournal\JournalDialog.cs" />
+    <Compile Include="Core\CableJournal\Services\ExcelExporter.cs" />
+    <Compile Include="Core\CableJournal\Services\TemplateValidator.cs" />
+    <Compile Include="Core\CableJournal\Services\FileDialogService.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportCableJournalByParamCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportApsCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportSouyeCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Filters\CommentsFilter.cs" />
+    <Compile Include="Core\CableJournal\Models\CableRecord.cs" />
+    <Compile Include="Core\CableJournal\Models\DeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Models\ExcelColumnMap.cs" />
+    <Compile Include="Core\CableJournal\Models\SystemType.cs" />
+    <Compile Include="Core\CableJournal\Models\TemplateStructure.cs" />
+    <Compile Include="Core\CableJournal\Monitoring\CancellationMonitor.cs" />
+    <Compile Include="Core\CableJournal\Services\ExecutionLogger.cs" />
+    <Compile Include="Core\CableJournal\Services\GraphConnectivityDiagnostics.cs" />
+    <Compile Include="Core\CableJournal\Services\LoggedRouteLengthCalculator.cs" />
+    <Compile Include="Core\CableJournal\Services\RouteLengthCalculator.Cancellable.cs" />
+    <Compile Include="Core\CableJournal\Services\RouteLengthCalculator.cs" />
+    <Compile Include="Core\CableJournal\Services\TemplateValidationResult.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\Models\ApsDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\Models\SecurityDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\Models\SouyeDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\Models\SouyeParameterStandard.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeCableSpec.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeParameterMapper.cs" />
     <Compile Include="Mcp\McpArgs.cs" />
     <Compile Include="Mcp\McpCommandExecutor.cs" />
     <Compile Include="Mcp\McpEventQueue.cs" />
@@ -135,6 +210,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="PluginForRevit2022.addin" />
+    <None Include="packages.config" />
+    <Content Include="Resourses\ARBM_ФОП_2026_v1.1_КЖ.txt">
+      <Link>ARBM_ФОП_2026_v1.1_КЖ.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <Page Include="UI\AddSharedParametersWindow.xaml">

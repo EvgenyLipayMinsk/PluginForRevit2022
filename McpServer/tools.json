@@ -1422,6 +1422,353 @@
         "readOnlyHint": false,
         "destructiveHint": false
       }
+    },
+    {
+      "name": "export_cable_journal",
+      "title": "Export cable journal",
+      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false also needs templatePath and savePath, writes the file and opens it. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "system"
+        ],
+        "properties": {
+          "system": {
+            "type": "string",
+            "enum": [
+              "security",
+              "aps",
+              "souye"
+            ],
+            "description": "security = СОТС (охранная сигнализация), aps = АПС, souye = СОУЭ."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Value of the Comments parameter selecting the elements, e.g. АПС. Required for aps and souye; for security empty = all controllers."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "eom",
+              "adsk"
+            ],
+            "description": "souye only: parameter naming standard. Ask the designer."
+          },
+          "templatePath": {
+            "type": "string",
+            "description": "Excel template path (.xlsx). Required when dryRun=false."
+          },
+          "savePath": {
+            "type": "string",
+            "description": "Output path (.xlsx). Required when dryRun=false."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow replacing an existing output file."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = calculate only (default); false = write the Excel file."
+          }
+        }
+      },
+      "timeoutSeconds": 1860
+    },
+    {
+      "name": "mark_devices",
+      "title": "Mark devices for the cable journal",
+      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) and needs routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families that are not in the line.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ids",
+          "system",
+          "controller",
+          "line"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device element ids of the line."
+          },
+          "system": {
+            "type": "string",
+            "enum": [
+              "aps",
+              "security",
+              "souye"
+            ],
+            "description": "aps = АПС, security = СОТС, souye = СОУЭ."
+          },
+          "building": {
+            "type": "string",
+            "description": "ARBM_Корпус. Required for aps and souye."
+          },
+          "controller": {
+            "type": "string",
+            "description": "Controller number."
+          },
+          "bco": {
+            "type": "string",
+            "description": "ARBM_ПСБ_БЦО for families without a BCO in the marking settings."
+          },
+          "line": {
+            "type": "string",
+            "description": "Line number."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Comments value used by the journal to select elements. Empty = existing Comments are kept. Required for order=route."
+          },
+          "floor": {
+            "type": "string",
+            "description": "Floor as a number. Empty = digits from the element's level name."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "adsk",
+              "eom"
+            ],
+            "description": "souye only: which floor parameter to fill."
+          },
+          "startNumber": {
+            "type": "integer",
+            "default": 1,
+            "description": "First device number."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "route",
+              "snake"
+            ],
+            "default": "manual",
+            "description": "manual = order of ids; route = along the journal's routes; snake = rows across the plan."
+          },
+          "controllerElementId": {
+            "type": "integer",
+            "description": "Controller element id; required for order=route."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
+          },
+          "rowMm": {
+            "type": "number",
+            "default": 3000,
+            "description": "Row height for order=snake, mm."
+          }
+        }
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "name": "check_project_parameters",
+      "title": "Check plugin parameters in the project",
+      "description": "Checks that the shared parameters used by the plugin are loaded in the project and bound to the required categories. dryRun=true (default) only reports issues; dryRun=false loads missing parameters from the plugin's shared parameter file and adds missing categories. Parameters with another GUID or a type binding are reported but not changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = report only (default); false = fix."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_detector_families",
+      "title": "List detector families",
+      "description": "Lists fire alarm device family types in the project that can be placed without a host (for place_detectors).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "place_detectors",
+      "title": "Place detectors in a room",
+      "description": "Places point smoke or heat detectors in one room per SP 484.1311500.2020 with Amendment 1: control radius 6.4 m smoke (rooms up to 12 m), 3.5 m heat (up to 9 m). Builds a grid so every point of the room is covered once or twice, at least wallOffsetMm from walls. Ceiling height comes from ceilings, floors or roofs above each point in the project and links, or from ceilingHeightMm. The designer must check obstacles, beams and ventilation. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view",
+          "detector",
+          "familyType"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "Plan view id or name; its level hosts the detectors."
+          },
+          "room": {
+            "type": "string",
+            "description": "Room number."
+          },
+          "roomId": {
+            "type": "integer",
+            "description": "Room element id (in the project or in link)."
+          },
+          "link": {
+            "type": "string",
+            "description": "Link containing the room (part of the name). Empty = search the project and all links."
+          },
+          "detector": {
+            "type": "string",
+            "enum": [
+              "smoke",
+              "heat"
+            ]
+          },
+          "familyType": {
+            "type": "string",
+            "description": "'Family : Type' from list_detector_families."
+          },
+          "coverage": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "default": 1,
+            "description": "Detectors controlling each point (SP 484, 6.6.1, 6.6.2). Ask the designer."
+          },
+          "ceilingHeightMm": {
+            "type": "number",
+            "description": "Manual ceiling height above the room floor. Empty = find the ceiling."
+          },
+          "wallOffsetMm": {
+            "type": "number",
+            "default": 500,
+            "description": "Distance from walls, mm."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Links to search for the ceiling (part of the name). Empty = all loaded links."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = place."
+          }
+        }
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "get_marking_settings",
+      "title": "Read marking settings",
+      "description": "Returns the settings profiles (settings containers, no login or password), the current profile, BCO per family and whether a family takes part in the cable journal line.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "set_marking_settings",
+      "title": "Save marking settings",
+      "description": "Saves marking settings for the listed families in the current profile; other families are kept. Changes a JSON file, not the Revit project.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "families"
+        ],
+        "properties": {
+          "families": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Family name."
+                },
+                "bco": {
+                  "type": "string",
+                  "description": "BCO for this family; empty = value from marking."
+                },
+                "inLine": {
+                  "type": "boolean",
+                  "default": true,
+                  "description": "Takes part in the cable journal line."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "export_marking_account",
+      "title": "Export settings profile",
+      "description": "Saves the current settings profile to a JSON file that can be passed to another user.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path of the JSON file."
+          }
+        }
+      }
+    },
+    {
+      "name": "import_marking_account",
+      "title": "Add settings profile from file",
+      "description": "Adds a settings profile from a JSON file and makes it current. Existing profiles are not changed.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path of the JSON file."
+          }
+        }
+      }
+    },
+    {
+      "name": "select_marking_profile",
+      "title": "Select settings profile",
+      "description": "Makes the named settings profile current.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Profile name from get_marking_settings."
+          }
+        }
+      }
     }
   ]
 }

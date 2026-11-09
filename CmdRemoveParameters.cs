@@ -14,7 +14,7 @@ namespace PluginForRevit2022
 {
     [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
-    internal class CmdRemoveParameters : IExternalCommand
+    public class CmdRemoveParameters : IExternalCommand
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {

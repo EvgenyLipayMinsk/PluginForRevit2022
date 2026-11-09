@@ -106,6 +106,87 @@ namespace PluginForRevit2022.Mcp
                 return DimensionOperations.DimensionElements(ActiveProject(app), request);
             });
 
+            // Кабельный журнал: версия без окон
+            Register("export_cable_journal", (app, args) => CableJournalOperations.Export(ActiveProject(app), new CableJournalRequest
+            {
+                System = args.String("system"),
+                Comments = args.String("comments"),
+                ParameterStandard = args.String("parameterStandard"),
+                TemplatePath = args.String("templatePath"),
+                SavePath = args.String("savePath"),
+                Overwrite = args.Bool("overwrite") ?? false,
+                DryRun = args.Bool("dryRun") ?? true,
+            }));
+
+            // Маркировка под кабельный журнал
+            Register("mark_devices", (app, args) => DeviceMarkingOperations.Mark(ActiveProject(app), new MarkDevicesRequest
+            {
+                Ids = args.StringList("ids").Select(long.Parse).ToList(),
+                System = args.String("system"),
+                Building = args.String("building"),
+                Controller = args.String("controller"),
+                Bco = args.String("bco"),
+                Line = args.String("line"),
+                Comments = args.String("comments"),
+                Floor = args.String("floor"),
+                ParameterStandard = args.String("parameterStandard"),
+                StartNumber = args.Int("startNumber") ?? 1,
+                Order = args.String("order") ?? "manual",
+                RowMm = args.Double("rowMm") ?? 3000,
+                ControllerElementId = args.Long("controllerElementId"),
+                DryRun = args.Bool("dryRun") ?? true,
+            }));
+
+            // Проверка параметров плагина в проекте
+            Register("check_project_parameters", (app, args) =>
+                PluginParameterCheck.Run(ActiveProject(app), app.Application, args.Bool("dryRun") ?? true));
+
+            // Размещение извещателей
+            Register("list_detector_families", (app, args) => new Dictionary<string, object>
+            {
+                ["families"] = DetectorPlacementOperations.ListFamilies(ActiveProject(app)),
+            });
+            Register("place_detectors", (app, args) => DetectorPlacementOperations.Place(ActiveProject(app), new PlaceDetectorsRequest
+            {
+                View = args.String("view"),
+                Room = args.String("room"),
+                RoomId = args.Long("roomId"),
+                Link = args.String("link"),
+                Detector = args.String("detector"),
+                FamilyType = args.String("familyType"),
+                Coverage = args.Int("coverage") ?? 1,
+                CeilingHeightMm = args.Double("ceilingHeightMm"),
+                WallOffsetMm = args.Double("wallOffsetMm") ?? 500,
+                Links = args.StringList("links"),
+                DryRun = args.Bool("dryRun") ?? true,
+            }));
+
+            // Настройки маркировки текущего пользователя
+            Register("get_marking_settings", (app, args) => MarkingSettings.ToResult(ActiveProject(app)));
+            Register("set_marking_settings", (app, args) => MarkingSettings.Merge(ActiveProject(app),
+                args.ObjectList("families").Select(f => new FamilySetting
+                {
+                    Name = f.String("name"),
+                    Bco = f.String("bco"),
+                    InLine = f.Bool("inLine") ?? true,
+                }).ToList()));
+
+            Register("select_marking_profile", (app, args) =>
+            {
+                MarkingSettings.Select(args.String("name"));
+                return MarkingSettings.ToResult(ActiveProject(app));
+            });
+            Register("export_marking_account", (app, args) =>
+            {
+                MarkingSettings.Export(args.String("path"));
+                return new Dictionary<string, object> { ["saved"] = args.String("path") };
+            });
+            Register("import_marking_account", (app, args) =>
+            {
+                MarkingSettings.AddFromFile(args.String("path"));
+                return MarkingSettings.ToResult(ActiveProject(app));
+            });
+
             // Марки помещений
             Register("list_room_tag_types", (app, args) => new Dictionary<string, object>
             {

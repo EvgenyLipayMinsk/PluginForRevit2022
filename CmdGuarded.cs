@@ -14,9 +14,26 @@ namespace PluginForRevit2022
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            return ProjectGuard.Allow(commandData.Application)
-                ? new TCommand().Execute(commandData, ref message, elements)
-                : Result.Cancelled;
+            string name = typeof(TCommand).Name;
+            string document = commandData.Application.ActiveUIDocument?.Document?.Title ?? "нет документа";
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            PluginLog.Info("command.start", $"{name} | {document}");
+            try
+            {
+                if (!ProjectGuard.Allow(commandData.Application))
+                {
+                    PluginLog.Info("command.end", $"{name} | Cancelled на проверке параметров | {timer.ElapsedMilliseconds} мс");
+                    return Result.Cancelled;
+                }
+                Result result = new TCommand().Execute(commandData, ref message, elements);
+                PluginLog.Info("command.end", $"{name} | {result} | {timer.ElapsedMilliseconds} мс" + (string.IsNullOrEmpty(message) ? "" : " | " + message));
+                return result;
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error("command.crash", ex, $"{name} | {timer.ElapsedMilliseconds} мс");
+                throw;
+            }
         }
     }
 
@@ -73,6 +90,7 @@ namespace PluginForRevit2022
             {
                 return true;
             }
+            PluginLog.Info("parameters.issues", string.Join("; ", issues.Select(i => $"{i.Name}: {i.Kind}")));
 
             if (SessionWindows.IsHidden(WindowKey))
             {

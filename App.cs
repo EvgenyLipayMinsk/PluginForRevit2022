@@ -10,11 +10,15 @@ namespace PluginForRevit2022
         public Result OnShutdown(UIControlledApplication application)
         {
             Mcp.McpHost.Stop(); // освободить порт при закрытии Revit
+            Core.PluginLog.Info("revit.shutdown");
             return Result.Succeeded;
         }
 
         public Result OnStartup(UIControlledApplication application)
         {
+            Core.PluginLog.Cleanup();
+            Core.PluginLog.Info("revit.startup", $"{application.ControlledApplication.VersionName} {application.ControlledApplication.VersionBuild} | плагин " +
+                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version + " | " + System.Environment.MachineName);
             //Создание новой панели AerBIM Manager
             string tabName = "AerBIM Manager";
             string panelNameWorkTools = "Work Tools";
@@ -82,6 +86,14 @@ namespace PluginForRevit2022
             detectorsButton.ToolTip = "Разместить дымовые или тепловые извещатели в помещении кликом на плане (СП 484 с Изменением № 1).";
             detectorsButton.LargeImage = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(198, 40, 40), 32, "ИП");
             journalPanel.AddItem(detectorsButton);
+            #endregion
+
+            #region Поддержка
+            var supportPanel = application.CreateRibbonPanel(tabName, "Поддержка");
+            var saveLog = new PushButtonData("Сохранить лог", "Сохранить\rлог", curAssembly, "PluginForRevit2022.CmdSaveLog");
+            saveLog.ToolTip = "Сохранить журнал действий плагина и сведения о компьютере в ZIP-архив для разработчика.";
+            saveLog.LargeImage = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(97, 97, 97), 32, "LOG");
+            supportPanel.AddItem(saveLog);
             #endregion
 
             #region Панель MCP: соединение с ИИ-клиентом

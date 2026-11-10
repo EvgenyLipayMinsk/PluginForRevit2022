@@ -80,6 +80,8 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Transactions" />
     <Reference Include="System.Windows.Forms" />
@@ -126,6 +128,7 @@
     <Compile Include="CmdMcp.cs" />
     <Compile Include="CmdMarkDevices.cs" />
     <Compile Include="CmdGuarded.cs" />
+    <Compile Include="CmdSaveLog.cs" />
     <Compile Include="CmdDeviceLine.cs" />
     <Compile Include="CmdMarkingSettings.cs" />
     <Compile Include="CmdPlaceDetectors.cs" />
@@ -146,6 +149,24 @@
     <Compile Include="Core\SheetOperations.cs" />
     <Compile Include="Core\ViewOperations.cs" />
     <Compile Include="Core\DeviceMarkingOperations.cs" />
+    <Compile Include="Core\PluginLog.cs" />
+    <Compile Include="Core\ClashOperations.cs" />
+    <Compile Include="Core\RoomAnalysisOperations.cs" />
+    <Compile Include="Core\BuildingElementOperations.cs" />
+    <Compile Include="Core\DetectorCheckOperations.cs" />
+    <Compile Include="Core\MepSpacingOperations.cs" />
+    <Compile Include="Core\ModelInsightOperations.cs" />
+    <Compile Include="Core\OpsCommon.cs" />
+    <Compile Include="Core\ProjectInfoOperations.cs" />
+    <Compile Include="Core\ElementQueryOperations.cs" />
+    <Compile Include="Core\ElementEditOperations.cs" />
+    <Compile Include="Core\AnnotationOperations.cs" />
+    <Compile Include="Core\CleanupOperations.cs" />
+    <Compile Include="Core\SelectionOperations.cs" />
+    <Compile Include="Core\ColorOperations.cs" />
+    <Compile Include="Core\ScheduleOperations.cs" />
+    <Compile Include="Core\ExportOperations.cs" />
+    <Compile Include="Core\ModelCheckOperations.cs" />
     <Compile Include="Core\DeviceLineOperations.cs" />
     <Compile Include="Core\MarkingSettings.cs" />
     <Compile Include="Core\DetectorPlacementOperations.cs" />

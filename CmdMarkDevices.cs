@@ -24,7 +24,7 @@ namespace PluginForRevit2022
             UIDocument uiDoc = commandData.Application.ActiveUIDocument;
             Document doc = uiDoc.Document;
 
-            var window = new MarkDevicesWindow();
+            var window = new MarkDevicesWindow(DeviceLineOperations.ListLines(doc).Select(l => l.Title).ToList());
             new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
             if (window.ShowDialog() != true)
             {
@@ -163,7 +163,7 @@ namespace PluginForRevit2022
 
         public string SystemTitle => (string)((ComboBoxItem)_system.SelectedItem).Content;
 
-        public MarkDevicesWindow()
+        public MarkDevicesWindow(List<string> existingLines)
         {
             Title = "Маркировка устройств";
             Width = 420;
@@ -172,6 +172,15 @@ namespace PluginForRevit2022
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var panel = new StackPanel { Margin = new Thickness(12) };
+            if (existingLines.Count > 0)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "Линии в проекте:\n" + string.Join("\n", existingLines.Take(8)) + (existingLines.Count > 8 ? $"\n… ещё {existingLines.Count - 8}" : ""),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = System.Windows.Media.Brushes.DimGray,
+                });
+            }
             void Row(string label, Control control)
             {
                 panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 6, 0, 2) });

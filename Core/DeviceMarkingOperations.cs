@@ -144,7 +144,12 @@ namespace PluginForRevit2022.Core
                 }
             }
 
-            int occupied = devices.Count + OtherDevicesOnLine(doc, system, request, devices);
+            int others = OtherDevicesOnLine(doc, system, request, devices);
+            if (others > 0)
+            {
+                warnings.Add($"на этой линии уже размечено устройств вне выбора: {others} — номера могут повториться");
+            }
+            int occupied = devices.Count + others;
             if (occupied > LineCapacity)
             {
                 warnings.Add($"на линии {occupied} адресов при ёмкости {LineCapacity}");

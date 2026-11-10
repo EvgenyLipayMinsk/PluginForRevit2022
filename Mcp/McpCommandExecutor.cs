@@ -197,12 +197,135 @@ namespace PluginForRevit2022.Mcp
             });
 
             // Правка размеченной линии
+            Register("list_marked_lines", (app, args) => DeviceLineOperations.ListLinesResult(ActiveProject(app)));
             Register("add_device_to_line", (app, args) => DeviceLineOperations.Add(ActiveProject(app),
-                args.Long("afterId") ?? throw new ArgumentException("Укажите afterId."),
+                args.String("line"), args.Long("afterId"),
                 args.Long("deviceId") ?? throw new ArgumentException("Укажите deviceId."),
                 args.Bool("dryRun") ?? true));
-            Register("remove_devices_from_line", (app, args) => DeviceLineOperations.Remove(ActiveProject(app),
+            Register("remove_devices_from_line", (app, args) => DeviceLineOperations.Remove(ActiveProject(app), args.String("line"),
                 args.StringList("ids").Select(long.Parse).ToList(), args.Bool("dryRun") ?? true));
+
+            // Выделение и показ элементов
+            Register("get_selected_elements", (app, args) => SelectionOperations.GetSelected(ActiveUIDocument(app)));
+            Register("show_elements", (app, args) => SelectionOperations.Show(ActiveUIDocument(app),
+                args.StringList("ids").Select(long.Parse).ToList(), args.String("action") ?? "zoom"));
+
+            // Раскраска по параметру
+            Register("color_by_parameter", (app, args) => ColorOperations.ColorByParameter(ActiveProject(app),
+                args.String("view"), args.StringList("categories"), args.String("parameter"),
+                args.Bool("reset") ?? false, args.Bool("dryRun") ?? true));
+
+            // Спецификации
+            Register("list_schedules", (app, args) => ScheduleOperations.List(ActiveProject(app)));
+            Register("get_schedule_data", (app, args) => ScheduleOperations.Read(ActiveProject(app), args.String("schedule")));
+            Register("export_schedule", (app, args) => ScheduleOperations.Export(ActiveProject(app),
+                args.String("schedule"), args.String("folder"), args.String("fileName")));
+            Register("create_schedule", (app, args) => ScheduleOperations.Create(ActiveProject(app),
+                args.String("category"), args.String("name"), args.StringList("fields"), args.String("sortBy"), args.Bool("dryRun") ?? true));
+
+            // Экспорт листов
+            Register("export_sheets", (app, args) => ExportOperations.ExportSheets(ActiveProject(app),
+                args.StringList("sheets"), args.String("format"), args.String("folder"), args.String("dwgSetup"),
+                args.Bool("combine") ?? false, args.Bool("dryRun") ?? true));
+
+            // Проверки модели и очистка
+            Register("find_untagged_elements", (app, args) => ModelCheckOperations.Untagged(ActiveProject(app), args.String("view"), args.StringList("categories")));
+            Register("find_undimensioned_elements", (app, args) => ModelCheckOperations.Undimensioned(ActiveProject(app), args.String("view"), args.StringList("categories")));
+            Register("get_warnings", (app, args) => ModelCheckOperations.Warnings(ActiveProject(app)));
+            Register("wipe_empty_tags", (app, args) => ModelCheckOperations.WipeEmptyTags(ActiveProject(app), args.String("view"), args.Bool("dryRun") ?? true));
+
+            // Сведения о проекте и модели
+            Register("get_project_info", (app, args) => ProjectInfoOperations.ProjectInfo(ActiveProject(app)));
+            Register("get_current_view_info", (app, args) => ProjectInfoOperations.ViewInfo(ActiveProject(app)));
+            Register("get_worksets", (app, args) => ProjectInfoOperations.Worksets(ActiveProject(app)));
+            Register("get_phases", (app, args) => ProjectInfoOperations.Phases(ActiveProject(app)));
+            Register("analyze_model_statistics", (app, args) => ProjectInfoOperations.Statistics(ActiveProject(app)));
+            Register("check_model_health", (app, args) => ProjectInfoOperations.Health(ActiveProject(app)));
+            Register("manage_links", (app, args) => ProjectInfoOperations.Links(ActiveProject(app), args.String("action"), args.StringList("links"), args.Bool("dryRun") ?? true));
+
+            // Поиск, измерения, коллизии, данные
+            Register("filter_elements", (app, args) => ElementQueryOperations.Filter(ActiveProject(app), FilterArgs(args)));
+            Register("get_elements_in_spatial_volume", (app, args) =>
+            {
+                ElementFilterRequest request = FilterArgs(args);
+                if (request.MinMm == null || request.MaxMm == null) throw new ArgumentException("Укажите minMm и maxMm.");
+                return ElementQueryOperations.Filter(ActiveProject(app), request);
+            });
+            Register("measure_between_elements", (app, args) => ElementQueryOperations.Measure(ActiveProject(app),
+                args.Long("firstId") ?? throw new ArgumentException("Укажите firstId."), args.Long("secondId") ?? throw new ArgumentException("Укажите secondId.")));
+            Register("clash_detection", (app, args) => ClashOperations.Find(ActiveProject(app), new ClashRequest
+            {
+                CategoriesA = args.StringList("categoriesA"),
+                CategoriesB = args.StringList("categoriesB"),
+                View = args.String("view"),
+                IncludeLinks = args.Bool("includeLinks") ?? true,
+                Links = args.StringList("links"),
+                MinVolumeCm3 = args.Double("minVolumeCm3") ?? 50,
+                Limit = args.Int("limit") ?? 300,
+            }));
+            Register("export_elements_data", (app, args) => ElementQueryOperations.ExportCsv(ActiveProject(app), FilterArgs(args), args.StringList("parameters"), args.String("path")));
+
+            // Материалы
+            Register("get_materials", (app, args) => ElementQueryOperations.Materials(ActiveProject(app), args.String("nameContains"), args.String("materialClass")));
+            Register("get_material_properties", (app, args) => ElementQueryOperations.MaterialProperties(ActiveProject(app), args.String("material")));
+            Register("get_material_quantities", (app, args) => ElementQueryOperations.MaterialQuantities(ActiveProject(app), FilterArgs(args)));
+
+            // Изменение элементов
+            Register("delete_elements", (app, args) => ElementEditOperations.Delete(ActiveProject(app), Ids(args, "ids"), args.Bool("dryRun") ?? true));
+            Register("change_element_type", (app, args) => ElementEditOperations.ChangeType(ActiveProject(app), Ids(args, "ids"),
+                args.String("category"), args.String("fromType"), args.String("toType"), args.Bool("dryRun") ?? true));
+            Register("modify_elements", (app, args) => ElementEditOperations.Modify(ActiveProject(app), Ids(args, "ids"), args.String("action"),
+                args.Double("dxMm") ?? 0, args.Double("dyMm") ?? 0, args.Double("dzMm") ?? 0, args.Double("angle") ?? 0, args.String("axis"), args.Bool("dryRun") ?? true));
+            Register("copy_elements", (app, args) => ElementEditOperations.CopyToViews(ActiveProject(app), Ids(args, "ids"),
+                args.String("fromView"), args.StringList("toViews"), args.Bool("dryRun") ?? true));
+            Register("match_element_properties", (app, args) => ElementEditOperations.MatchProperties(ActiveProject(app),
+                args.Long("sourceId") ?? throw new ArgumentException("Укажите sourceId."), Ids(args, "targetIds"), args.StringList("parameters"), args.Bool("dryRun") ?? true));
+            Register("set_element_phase", (app, args) => ElementEditOperations.SetPhase(ActiveProject(app), Ids(args, "ids"),
+                args.String("created"), args.String("demolished"), args.Bool("dryRun") ?? true));
+            Register("set_element_workset", (app, args) => ElementEditOperations.SetWorkset(ActiveProject(app), Ids(args, "ids"), args.String("workset"), args.Bool("dryRun") ?? true));
+            Register("load_family", (app, args) => ElementEditOperations.LoadFamily(ActiveProject(app), args.String("path"), args.Bool("dryRun") ?? true));
+            Register("override_graphics", (app, args) => ElementEditOperations.OverrideGraphics(ActiveProject(app), args.String("view"), Ids(args, "ids"),
+                args.String("color"), args.Int("lineWeight"), args.Int("transparency"), args.Bool("halftone"), args.Bool("reset") ?? false, args.Bool("dryRun") ?? true));
+
+            // Аннотации и изменения листов
+            Register("create_text_note", (app, args) => AnnotationOperations.TextNote(ActiveProject(app), args.String("view"),
+                args.Double("xMm") ?? throw new ArgumentException("Укажите xMm."), args.Double("yMm") ?? throw new ArgumentException("Укажите yMm."),
+                args.String("text"), args.String("type"), args.Bool("dryRun") ?? true));
+            Register("create_filled_region", (app, args) => AnnotationOperations.FilledRegion(ActiveProject(app), args.String("view"),
+                args.DoubleArray("pointsMm"), args.String("type"), args.Bool("dryRun") ?? true));
+            Register("manage_revisions", (app, args) => AnnotationOperations.Revisions(ActiveProject(app), args.String("action"), args.String("description"),
+                args.String("date"), args.String("issuedBy"), args.String("issuedTo"), args.String("revision"), args.StringList("sheets"), args.Bool("dryRun") ?? true));
+            Register("tag_equipment", (app, args) => AnnotationOperations.TagElements(ActiveProject(app), args.String("view"), args.StringList("categories"),
+                args.String("tagType"), args.Double("offsetMm") ?? 300, args.Bool("leader") ?? false, args.Bool("dryRun") ?? true));
+
+            // Переименование и очистка
+            Register("batch_rename", (app, args) => CleanupOperations.BatchRename(ActiveProject(app), args.String("target"), args.StringList("categories"),
+                args.String("contains"), args.String("find"), args.String("replace"), args.String("prefix"), args.String("suffix"), args.Bool("dryRun") ?? true));
+            Register("cad_link_cleanup", (app, args) => CleanupOperations.CadCleanup(ActiveProject(app), args.String("action"), args.String("scope"),
+                args.StringList("ids").Select(long.Parse).ToList(), args.Bool("dryRun") ?? true));
+            Register("purge_unused", (app, args) => CleanupOperations.PurgeUnused(ActiveProject(app), args.StringList("kinds"), args.StringList("categories"), args.Bool("dryRun") ?? true));
+
+            // Анализ модели: помещения, ограждающие конструкции, проверки
+            Register("get_rooms", (app, args) => RoomAnalysisOperations.Rooms(ActiveProject(app), RoomArgs(args), args.Bool("includeBoundary") ?? false));
+            Register("get_room_surface_areas", (app, args) => RoomAnalysisOperations.SurfaceAreas(ActiveProject(app), RoomArgs(args),
+                args.Bool("subtractOpenings") ?? true, args.Bool("includeBreakdown") ?? true));
+            Register("get_room_openings", (app, args) => RoomAnalysisOperations.RoomOpenings(ActiveProject(app), RoomArgs(args), args.Bool("includeDetails") ?? true));
+            Register("get_spaces", (app, args) => RoomAnalysisOperations.Spaces(ActiveProject(app), args.String("level"), Ids(args, "ids")));
+            Register("get_doors_windows", (app, args) => BuildingElementOperations.DoorsWindows(ActiveProject(app), args.String("category"), args.String("level"),
+                args.Bool("includeLinks") ?? false, args.StringList("links"), args.Int("maxCount") ?? 1000));
+            Register("get_wall_info", (app, args) => BuildingElementOperations.WallInfo(ActiveProject(app), Ids(args, "ids"), args.String("link")));
+            Register("find_walls_near_point", (app, args) => BuildingElementOperations.WallsNear(ActiveProject(app),
+                args.Double("xMm") ?? throw new ArgumentException("Укажите xMm."), args.Double("yMm") ?? throw new ArgumentException("Укажите yMm."),
+                args.Double("radiusMm") ?? 1000, args.String("level"), args.Bool("includeLinks") ?? true));
+            Register("check_detectors", (app, args) => DetectorCheckOperations.Check(ActiveProject(app), args.String("view"),
+                args.StringList("smokeKeywords"), args.StringList("heatKeywords"), args.Int("coverage") ?? 1, args.Bool("checkVents") ?? true));
+            Register("check_mep_spacing", (app, args) => MepSpacingOperations.Check(ActiveProject(app),
+                args.Double("clearanceMm") ?? throw new ArgumentException("Укажите clearanceMm: требуемый зазор задаёт проектировщик."),
+                args.StringList("categories"), args.Bool("includeLinks") ?? true, args.Bool("includeInsulation") ?? true,
+                args.DoubleArray("minMm"), args.DoubleArray("maxMm"), args.Int("maxResults") ?? 300));
+            Register("get_field_values", (app, args) => ModelInsightOperations.FieldValues(ActiveProject(app), args.StringList("categories"),
+                args.String("parameter"), args.String("link"), args.String("view")));
+            Register("get_view_extents", (app, args) => ModelInsightOperations.ViewExtents(ActiveProject(app), args.String("view")));
 
             // Марки помещений
             Register("list_room_tag_types", (app, args) => new Dictionary<string, object>
@@ -335,13 +458,19 @@ namespace PluginForRevit2022.Mcp
                     $"Неизвестная команда: {name}. Доступны: {string.Join(", ", Commands.Keys)}");
             }
 
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            string arguments = PluginLog.Short(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(request.Parameters));
             try
             {
-                return McpResponse.Ok(request.RequestId, handler(uiApp, new McpArgs(request.Parameters)));
+                object data = handler(uiApp, new McpArgs(request.Parameters));
+                PluginLog.Info("mcp", $"{name} | OK | {timer.ElapsedMilliseconds} мс | {arguments}");
+                return McpResponse.Ok(request.RequestId, data);
             }
             catch (Exception ex)
             {
                 McpLog.Error($"Команда {name} завершилась с ошибкой", ex);
+                PluginLog.Warn("mcp", $"{name} | ERROR {PluginLog.Short(ex.Message, 300)} | {timer.ElapsedMilliseconds} мс | {arguments}" +
+                    (ex is ArgumentException ? "" : " | " + PluginLog.Short(ex.ToString(), 1500)));
                 return McpResponse.Fail(request.RequestId, ex.Message);
             }
         }
@@ -364,6 +493,31 @@ namespace PluginForRevit2022.Mcp
 
         private static Document ActiveDocument(UIApplication app) =>
             app.ActiveUIDocument?.Document ?? throw new InvalidOperationException("В Revit нет открытого документа.");
+
+        private static List<long> Ids(McpArgs args, string key) => args.StringList(key).Select(long.Parse).ToList();
+
+        private static RoomQuery RoomArgs(McpArgs args) => new RoomQuery
+        {
+            Source = args.String("source") ?? "all",
+            Links = args.StringList("links"),
+            Level = args.String("level"),
+            Numbers = args.StringList("numbers"),
+            Ids = Ids(args, "ids"),
+        };
+
+        private static ElementFilterRequest FilterArgs(McpArgs args) => new ElementFilterRequest
+        {
+            Categories = args.StringList("categories"),
+            FamilyContains = args.String("familyContains"),
+            TypeContains = args.String("typeContains"),
+            Level = args.String("level"),
+            View = args.String("view"),
+            MinMm = args.DoubleArray("minMm"),
+            MaxMm = args.DoubleArray("maxMm"),
+        };
+
+        private static UIDocument ActiveUIDocument(UIApplication app) =>
+            app.ActiveUIDocument ?? throw new InvalidOperationException("В Revit нет открытого документа.");
 
         private static Document ActiveProject(UIApplication app)
         {

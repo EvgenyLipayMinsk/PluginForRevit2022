@@ -20,25 +20,39 @@ namespace PluginForRevit2022
         }
     }
 
-    /// <summary>Окна, скрытые галочкой «Больше не показывать». Живёт до закрытия Revit и нигде не сохраняется.</summary>
+    /// <summary>Информационные окна, скрытые галочкой. Живёт до закрытия Revit и нигде не сохраняется.</summary>
     internal static class SessionWindows
     {
-        private static readonly Dictionary<string, object> Hidden = new Dictionary<string, object>();
+        public const string CheckText = "Больше не показывать это окно";
+        private static readonly HashSet<string> Hidden = new HashSet<string>();
 
-        public static void Hide(string window, object lastInput = null) => Hidden[window] = lastInput;
+        public static void Hide(string window) => Hidden.Add(window);
 
-        public static bool IsHidden(string window) => Hidden.ContainsKey(window);
+        public static bool IsHidden(string window) => Hidden.Contains(window);
 
-        /// <summary>Ввод последнего запуска скрытого окна; null — окно нужно показать.</summary>
-        public static T Input<T>(string window) where T : class =>
-            Hidden.TryGetValue(window, out object input) ? input as T : null;
-
-        public static System.Windows.Controls.CheckBox NewCheckBox() => new System.Windows.Controls.CheckBox
+        /// <summary>Сообщение о результате; скрытое окно не показывается.</summary>
+        public static void Inform(string window, string title, string text)
         {
-            Content = "Больше не показывать это окно",
-            FontSize = 11,
-            Margin = new System.Windows.Thickness(0, 10, 0, 0),
-        };
+            if (IsHidden(window)) return;
+            var dialog = new TaskDialog(title) { MainContent = text, CommonButtons = TaskDialogCommonButtons.Ok, VerificationText = CheckText };
+            dialog.Show();
+            if (dialog.WasVerificationChecked()) Hide(window);
+        }
+
+        /// <summary>Подтверждение действия; скрытое окно считается ответом «Да».</summary>
+        public static bool Confirm(string window, string title, string text)
+        {
+            if (IsHidden(window)) return true;
+            var dialog = new TaskDialog(title)
+            {
+                MainContent = text,
+                CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No,
+                VerificationText = CheckText,
+            };
+            if (dialog.Show() != TaskDialogResult.Yes) return false;
+            if (dialog.WasVerificationChecked()) Hide(window);
+            return true;
+        }
     }
 
     internal static class ProjectGuard
@@ -71,14 +85,15 @@ namespace PluginForRevit2022
                 MainInstruction = "В проекте не настроены параметры плагина",
                 MainContent = PluginParameterCheck.Report(issues),
                 CommonButtons = TaskDialogCommonButtons.Cancel,
-                DefaultButton = canFix ? TaskDialogResult.CommandLink1 : TaskDialogResult.CommandLink2,
-                VerificationText = "Больше не показывать это окно",
+                VerificationText = SessionWindows.CheckText,
             };
             if (canFix)
             {
                 dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Добавить параметры и категории", "Загрузить недостающее из ФОП плагина и продолжить");
             }
             dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Продолжить без изменений", "Команда может работать неполно");
+            // Кнопка по умолчанию задаётся только после добавления ссылок: иначе Revit выдаёт ArgumentException.
+            dialog.DefaultButton = canFix ? TaskDialogResult.CommandLink1 : TaskDialogResult.CommandLink2;
 
             TaskDialogResult answer = dialog.Show();
             if (dialog.WasVerificationChecked() && (answer == TaskDialogResult.CommandLink1 || answer == TaskDialogResult.CommandLink2))

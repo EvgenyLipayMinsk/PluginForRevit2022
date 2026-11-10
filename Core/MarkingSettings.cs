@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
+using ARBM.CableJournalExporter.Models;
 using Autodesk.Revit.DB;
 
 namespace PluginForRevit2022.Core
@@ -12,8 +13,41 @@ namespace PluginForRevit2022.Core
     {
         public string Name { get; set; }
         public string Bco { get; set; }
-        /// <summary>Участвует в построении линии для кабельного журнала.</summary>
-        public bool InLine { get; set; } = true;
+        /// <summary>Семейство применяется в линиях АПС.</summary>
+        public bool Aps { get; set; }
+        /// <summary>Семейство применяется в линиях СОТС.</summary>
+        public bool Security { get; set; }
+        /// <summary>Семейство применяется в линиях СОУЭ.</summary>
+        public bool Souye { get; set; }
+
+        public bool InSystem(string system)
+        {
+            switch (system)
+            {
+                case "aps": return Aps;
+                case "security": return Security;
+                case "souye": return Souye;
+                default: return false;
+            }
+        }
+    }
+
+    /// <summary>Запасы кабеля для кабельного журнала.</summary>
+    public sealed class JournalSettings
+    {
+        public double ApsPercent { get; set; } = 30;
+        public double SecurityPercent { get; set; } = 30;
+        public double SouyePercent { get; set; } = 40;
+        /// <summary>Добавляется к каждой строке (кабельной линии) журнала, м.</summary>
+        public double LineReserveM { get; set; }
+
+        public void Validate()
+        {
+            if (ApsPercent < 0 || SecurityPercent < 0 || SouyePercent < 0 || LineReserveM < 0)
+            {
+                throw new ArgumentException("Запасы кабеля не могут быть отрицательными.");
+            }
+        }
     }
 
     /// <summary>Содержимое файла профиля. Файл можно передать другому пользователю; паролей и логинов нет.</summary>
@@ -24,6 +58,7 @@ namespace PluginForRevit2022.Core
         public List<FamilySetting> Families { get; set; } = new List<FamilySetting>();
         /// <summary>Последние значения окна маркировки.</summary>
         public Dictionary<string, string> LastMarking { get; set; } = new Dictionary<string, string>();
+        public JournalSettings Journal { get; set; } = new JournalSettings();
     }
 
     /// <summary>Запись в списке профилей этого компьютера.</summary>
@@ -150,6 +185,7 @@ namespace PluginForRevit2022.Core
                 MarkingAccount account = new JavaScriptSerializer().Deserialize<MarkingAccount>(File.ReadAllText(path));
                 if (account?.Families == null) throw new FormatException("нет списка семейств");
                 if (account.LastMarking == null) account.LastMarking = new Dictionary<string, string>();
+                if (account.Journal == null) account.Journal = new JournalSettings();
                 return account;
             }
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is FormatException)
@@ -172,10 +208,12 @@ namespace PluginForRevit2022.Core
             WriteFile(path, ReadAccount());
         }
 
-        public static void Save(IEnumerable<FamilySetting> families)
+        public static void Save(IEnumerable<FamilySetting> families, JournalSettings journal)
         {
+            journal.Validate();
             MarkingAccount account = ReadAccount();
             account.Families = families.ToList();
+            account.Journal = journal;
             WriteFile(Current().FilePath, account);
         }
 
@@ -186,12 +224,39 @@ namespace PluginForRevit2022.Core
             WriteFile(Current().FilePath, account);
         }
 
+        // ===================== Запасы кабеля =====================
+
+        /// <summary>Коэффициент запаса для расчёта длин выбранной системы.</summary>
+        public static double CableFactor(string system)
+        {
+            JournalSettings journal = ReadAccount().Journal;
+            switch (system)
+            {
+                case "aps": return 1 + journal.ApsPercent / 100;
+                case "souye": return 1 + journal.SouyePercent / 100;
+                default: return 1 + journal.SecurityPercent / 100;
+            }
+        }
+
+        /// <summary>Добавляет к длине каждой строки журнала запас на линию из профиля.</summary>
+        public static void ApplyLineReserve(IEnumerable<CableRecord> records)
+        {
+            double reserve = ReadAccount().Journal.LineReserveM;
+            if (reserve <= 0) return;
+            foreach (CableRecord record in records)
+            {
+                record.Length = (double.Parse(record.Length) + reserve).ToString("F2");
+            }
+        }
+
         // ===================== Применение =====================
 
         public static MarkingSettings Load() => new MarkingSettings(ReadAccount().Families);
 
-        /// <summary>Новые семейства участвуют в линии, пока их не отключат.</summary>
-        public bool IsInLine(string family) => !_families.TryGetValue(family ?? "", out FamilySetting setting) || setting.InLine;
+        /// <summary>В линии системы участвуют только семейства с галочкой этой системы.</summary>
+        public bool IsInLine(string family, string system) => _families.TryGetValue(family ?? "", out FamilySetting setting) && setting.InSystem(system);
+
+        public bool AnyInLine(string system) => _families.Values.Any(f => f.InSystem(system));
 
         public string BcoOf(string family) =>
             _families.TryGetValue(family ?? "", out FamilySetting setting) && !string.IsNullOrWhiteSpace(setting.Bco) ? setting.Bco.Trim() : null;
@@ -207,7 +272,7 @@ namespace PluginForRevit2022.Core
                 .Distinct(StringComparer.CurrentCultureIgnoreCase)
                 .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
                 .Select(n => saved._families.TryGetValue(n, out FamilySetting s)
-                    ? new FamilySetting { Name = n, Bco = s.Bco, InLine = s.InLine }
+                    ? new FamilySetting { Name = n, Bco = s.Bco, Aps = s.Aps, Security = s.Security, Souye = s.Souye }
                     : new FamilySetting { Name = n })
                 .ToList();
         }
@@ -215,14 +280,20 @@ namespace PluginForRevit2022.Core
         public static Dictionary<string, object> ToResult(Document doc) => new Dictionary<string, object>
         {
             ["profile"] = Current().Name,
+            ["journal"] = ReadAccount().Journal,
             ["profiles"] = Profiles().Select(p => new Dictionary<string, object> { ["name"] = p.Name, ["file"] = p.FilePath, ["current"] = p.IsCurrent }).ToList(),
-            ["families"] = ForDocument(doc).Select(f => new Dictionary<string, object> { ["name"] = f.Name, ["bco"] = f.Bco, ["inLine"] = f.InLine }).ToList(),
+            ["families"] = ForDocument(doc).Select(f => new Dictionary<string, object> { ["name"] = f.Name, ["bco"] = f.Bco, ["aps"] = f.Aps, ["security"] = f.Security, ["souye"] = f.Souye }).ToList(),
         };
 
         /// <summary>Обновляет только переданные семейства текущего профиля.</summary>
-        public static Dictionary<string, object> Merge(Document doc, IEnumerable<FamilySetting> changes)
+        public static Dictionary<string, object> Merge(Document doc, IEnumerable<FamilySetting> changes, JournalSettings journal = null)
         {
             MarkingAccount account = ReadAccount();
+            if (journal != null)
+            {
+                journal.Validate();
+                account.Journal = journal;
+            }
             foreach (FamilySetting change in changes)
             {
                 account.Families.RemoveAll(f => string.Equals(f.Name, change.Name, StringComparison.CurrentCultureIgnoreCase));

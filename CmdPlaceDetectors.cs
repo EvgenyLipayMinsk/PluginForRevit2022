@@ -37,19 +37,13 @@ namespace PluginForRevit2022
                 return Result.Cancelled;
             }
 
-            const string windowKey = "place-detectors";
-            PlaceDetectorsRequest request = SessionWindows.Input<PlaceDetectorsRequest>(windowKey);
-            if (request == null || !families.Contains(request.FamilyType))
+            var window = new PlaceDetectorsWindow(families);
+            new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
+            if (window.ShowDialog() != true)
             {
-                var window = new PlaceDetectorsWindow(families);
-                new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
-                if (window.ShowDialog() != true)
-                {
-                    return Result.Cancelled;
-                }
-                request = window.Request;
-                if (window.DontShowAgain) SessionWindows.Hide(windowKey, request);
+                return Result.Cancelled;
             }
+            PlaceDetectorsRequest request = window.Request;
             request.View = RevitIds.IdOf(plan.Id).ToString();
 
             try
@@ -77,12 +71,12 @@ namespace PluginForRevit2022
                 var warnings = (List<string>)preview["warnings"];
                 string text = $"Помещение: {preview["room"]}\nИзвещателей: {preview["count"]}\nВысота потолка: {preview["maxHeightMm"]} мм\nРадиус зоны контроля: {preview["radiusM"]} м" +
                               (warnings.Count > 0 ? "\n\nВнимание:\n" + string.Join("\n", warnings) : "");
-                if (TaskDialog.Show("Извещатели", text + "\n\nРазместить?", TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No) != TaskDialogResult.Yes)
+                if (!SessionWindows.Confirm("place-detectors-confirm", "Извещатели", text + "\n\nРазместить?"))
                 {
                     return Result.Cancelled;
                 }
                 request.DryRun = false;
-                TaskDialog.Show("Извещатели", (string)DetectorPlacementOperations.Place(doc, request)["summary"]);
+                SessionWindows.Inform("place-detectors-result", "Извещатели", (string)DetectorPlacementOperations.Place(doc, request)["summary"]);
                 return Result.Succeeded;
             }
             catch (Exception ex)
@@ -103,11 +97,7 @@ namespace PluginForRevit2022
         private readonly TextBox _height = new TextBox();
         private readonly TextBox _offset = new TextBox { Text = "500" };
 
-        private readonly System.Windows.Controls.CheckBox _dontShow = SessionWindows.NewCheckBox();
-
         public PlaceDetectorsRequest Request { get; private set; }
-
-        public bool DontShowAgain => _dontShow.IsChecked == true;
 
         public PlaceDetectorsWindow(IEnumerable<string> families)
         {
@@ -136,7 +126,6 @@ namespace PluginForRevit2022
 
             var ok = new Button { Content = "Далее: кликнуть помещение", IsDefault = true, Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(6) };
             ok.Click += (s, e) => Accept();
-            panel.Children.Add(_dontShow);
             panel.Children.Add(ok);
             Content = panel;
         }

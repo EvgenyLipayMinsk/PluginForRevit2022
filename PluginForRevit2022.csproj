@@ -126,6 +126,7 @@
     <Compile Include="CmdMcp.cs" />
     <Compile Include="CmdMarkDevices.cs" />
     <Compile Include="CmdGuarded.cs" />
+    <Compile Include="CmdDeviceLine.cs" />
     <Compile Include="CmdMarkingSettings.cs" />
     <Compile Include="CmdPlaceDetectors.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
@@ -145,6 +146,7 @@
     <Compile Include="Core\SheetOperations.cs" />
     <Compile Include="Core\ViewOperations.cs" />
     <Compile Include="Core\DeviceMarkingOperations.cs" />
+    <Compile Include="Core\DeviceLineOperations.cs" />
     <Compile Include="Core\MarkingSettings.cs" />
     <Compile Include="Core\DetectorPlacementOperations.cs" />
     <Compile Include="Core\PluginParameterCheck.cs" />

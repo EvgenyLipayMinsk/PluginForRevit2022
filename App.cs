@@ -57,10 +57,21 @@ namespace PluginForRevit2022
                 journalPanel.AddItem(button);
             }
 
-            var markButton = new PushButtonData("Маркировка", "Маркировка", curAssembly, "PluginForRevit2022.GuardMarkDevices");
-            markButton.ToolTip = "Заполнить параметры устройств шлейфа для кабельного журнала: номера кликами или по трассам.";
-            markButton.LargeImage = Mcp.McpHost.CreateIndicator(journalColor, 32, "№");
-            journalPanel.AddItem(markButton);
+            var markIcon = Mcp.McpHost.CreateIndicator(journalColor, 32, "№");
+            var markMenuData = new PulldownButtonData("Маркировка", "Маркировка") { LargeImage = markIcon, ToolTip = "Маркировка устройств для кабельного журнала." };
+            var markMenu = (PulldownButton)journalPanel.AddItem(markMenuData);
+            foreach (var (id, text, command, tip) in new[]
+            {
+                ("Создать маркировку", "Создать маркировку", "GuardMarkDevices", "Заполнить параметры устройств шлейфа: номера кликами или по трассам."),
+                ("Добавить устройство", "Добавить устройство", "GuardAddDeviceToLine", "Вставить устройство в размеченную линию после выбранного."),
+                ("Удалить устройство", "Удалить устройство", "GuardRemoveDeviceFromLine", "Снять маркировку с устройств и закрыть пропуски в номерах."),
+            })
+            {
+                var item = new PushButtonData(id, text, curAssembly, "PluginForRevit2022." + command);
+                item.ToolTip = tip;
+                item.LargeImage = markIcon;
+                markMenu.AddPushButton(item);
+            }
 
             var markSettingsButton = new PushButtonData("Настройки маркировки", "Настройки\rмаркировки", curAssembly, "PluginForRevit2022.GuardMarkingSettings");
             markSettingsButton.ToolTip = "Какое БЦО применять к семействам и какие семейства участвуют в линии КЖ.";

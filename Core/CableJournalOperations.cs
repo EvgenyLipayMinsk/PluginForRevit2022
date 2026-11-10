@@ -74,6 +74,8 @@ namespace PluginForRevit2022.Core
                     (messages.Count > 0 ? " " + string.Join(" | ", messages.Distinct().Take(10)) : " Нет подходящих элементов."));
             }
 
+            MarkingSettings.ApplyLineReserve(records);
+
             if (!request.DryRun)
             {
                 new ExcelExporter().ExportCableRecords(request.TemplatePath, request.SavePath, records);
@@ -106,7 +108,7 @@ namespace PluginForRevit2022.Core
                 {
                     var controllers = new ApsDataCollector().CollectApsControllersWithLoopsByParam(doc, comments, cancel);
                     if (controllers == null || controllers.Count == 0) return null;
-                    return new ApsCableRecordBuilder(new ApsElementParser(), doc, LengthMode.Route, 1.3).Build(controllers, comments, cancel);
+                    return new ApsCableRecordBuilder(new ApsElementParser(), doc, LengthMode.Route, MarkingSettings.CableFactor("aps")).Build(controllers, comments, cancel);
                 }
                 case "souye":
                     return BuildSouye(doc, request, comments, cancel, messages);
@@ -117,7 +119,7 @@ namespace PluginForRevit2022.Core
                     bool all = string.IsNullOrEmpty(comments);
                     var controllers = all ? collector.CollectControllersWithLoops(doc) : collector.CollectControllersWithLoopsByParam(doc, comments);
                     if (controllers == null || controllers.Count == 0) return null;
-                    var builder = new SecurityCableRecordBuilder(parser, doc, LengthMode.Route, 1.3);
+                    var builder = new SecurityCableRecordBuilder(parser, doc, LengthMode.Route, MarkingSettings.CableFactor("security"));
                     return all ? builder.Build(controllers) : builder.Build(controllers, comments);
                 }
             }
@@ -144,7 +146,7 @@ namespace PluginForRevit2022.Core
                 messages.AddRange(errors);
                 return null;
             }
-            var built = new SouyeCableRecordBuilder(doc, LengthMode.Route, 1.4).Build(collected.Data, comments, cancel);
+            var built = new SouyeCableRecordBuilder(doc, LengthMode.Route, MarkingSettings.CableFactor("souye")).Build(collected.Data, comments, cancel);
             if (built == null || !built.IsSuccess)
             {
                 messages.Add(built?.ErrorMessage ?? "Ошибка при построении записей: результат null.");

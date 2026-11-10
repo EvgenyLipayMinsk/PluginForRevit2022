@@ -47,9 +47,17 @@
       <Directory Id="AerBIMFolder" Name="AerBIM">
         <Directory Id="PRODUCTFOLDER" Name="PluginForRevit">
           <Directory Id="MCPFOLDER" Name="McpServer" />
+          <Directory Id="TEMPLATEFOLDER" Name="Шаблоны" />
         </Directory>
       </Directory>
     </StandardDirectory>
+
+    <!-- Шаблон кабельного журнала: нужен при любой версии Revit -->
+    <ComponentGroup Id="TemplateFiles">
+      <Component Id="JournalTemplate" Directory="TEMPLATEFOLDER">
+        <File Id="JournalTemplateFile" Source="templ_kzh.xlsx" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
 
     <!-- Файлы надстройки: по компоненту на версию Revit -->
     <?foreach V in 2021;2022;2023;2024?>
@@ -57,14 +65,16 @@
       <Component Id="Manifest$(V)" Directory="ADDINS$(V)">
         <File Id="ManifestFile$(V)" Source="AerBIM.Manager.addin" KeyPath="yes" />
       </Component>
-      <Component Id="Plugin$(V)" Directory="APP$(V)">
-        <File Id="PluginFile$(V)" Source="..\bin\Release R$(V)\PluginForRevit2022.dll" KeyPath="yes" />
+      <Files Directory="APP$(V)" Include="..\bin\Release R$(V)\*.dll" />
+      <Component Id="Fop$(V)" Directory="APP$(V)">
+        <File Id="FopFile$(V)" Source="..\Resourses\ARBM_ФОП_2026_v1.1_КЖ.txt" KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
     <Feature Id="Revit$(V)" Title="Revit $(V)" Description="Надстройка AerBIM Manager для Revit $(V)." Level="1">
       <Level Value="1000" Condition="NOT REVIT$(V)" />
       <ComponentGroupRef Id="Files$(V)" />
+      <ComponentGroupRef Id="TemplateFiles" />
     </Feature>
     <?endforeach?>
 

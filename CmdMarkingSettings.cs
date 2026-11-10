@@ -11,6 +11,7 @@ using Microsoft.Win32;
 using PluginForRevit2022.Core;
 using ComboBox = System.Windows.Controls.ComboBox;
 using Grid = System.Windows.Controls.Grid;
+using TextBox = System.Windows.Controls.TextBox;
 
 namespace PluginForRevit2022
 {
@@ -50,6 +51,10 @@ namespace PluginForRevit2022
             CanUserDeleteRows = false,
             HeadersVisibility = DataGridHeadersVisibility.Column,
         };
+        private readonly TextBox _apsPercent = Number();
+        private readonly TextBox _securityPercent = Number();
+        private readonly TextBox _souyePercent = Number();
+        private readonly TextBox _lineReserve = Number();
         private List<FamilySetting> _rows;
         private bool _reloading;
 
@@ -57,26 +62,41 @@ namespace PluginForRevit2022
         {
             _doc = doc;
             Title = "Настройки маркировки";
-            Width = 720;
+            Width = 860;
+            MinWidth = 860;
             Height = 580;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-            _table.Columns.Add(new DataGridCheckBoxColumn { Header = "В линии КЖ", Binding = new System.Windows.Data.Binding("InLine") { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged } });
+            foreach (var (header, property) in new[] { ("АПС", "Aps"), ("СОТС", "Security"), ("СОУЭ", "Souye") })
+            {
+                _table.Columns.Add(new DataGridCheckBoxColumn { Header = header, Binding = new System.Windows.Data.Binding(property) { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged } });
+            }
             _table.Columns.Add(new DataGridTextColumn { Header = "Семейство", Binding = new System.Windows.Data.Binding("Name"), IsReadOnly = true, Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
             _table.Columns.Add(new DataGridTextColumn { Header = "БЦО", Binding = new System.Windows.Data.Binding("Bco") { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged }, Width = 120 });
 
             var bar = new StackPanel { Orientation = Orientation.Horizontal };
             bar.Children.Add(new TextBlock { Text = "Профиль", VerticalAlignment = VerticalAlignment.Center });
             bar.Children.Add(_profiles);
-            bar.Children.Add(Tool("+", "Новый профиль", NewProfile));
+            bar.Children.Add(Tool("Добавить профиль", "Создать новый профиль", NewProfile));
             bar.Children.Add(Tool("Сохранить", "Сохранить текущий профиль", SaveProfile));
             bar.Children.Add(Tool("Удалить", "Удалить текущий профиль", DeleteProfile));
             bar.Children.Add(Tool("Открыть файл…", "Подключить файл профиля, полученный от коллеги", OpenProfile));
             _profiles.SelectionChanged += (s, e) => SwitchProfile();
 
+            var reserves = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            reserves.Children.Add(new TextBlock { Text = "Запас кабеля, %:", VerticalAlignment = VerticalAlignment.Center });
+            foreach (var (label, box) in new[] { ("АПС", _apsPercent), ("СОТС", _securityPercent), ("СОУЭ", _souyePercent) })
+            {
+                reserves.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
+                reserves.Children.Add(box);
+            }
+            reserves.Children.Add(new TextBlock { Text = "Запас на каждую линию, м", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 4, 0) });
+            reserves.Children.Add(_lineReserve);
+
             var top = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             top.Children.Add(bar);
-            top.Children.Add(new TextBlock { Text = "Пустое БЦО — берётся значение из окна маркировки. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+            top.Children.Add(reserves);
+            top.Children.Add(new TextBlock { Text = "В линии каждой системы участвуют только семейства с её галочкой. Пустое БЦО — берётся значение из окна маркировки. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
 
             var layout = new Grid { Margin = new Thickness(12) };
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -100,6 +120,11 @@ namespace PluginForRevit2022
             _reloading = true;
             _profiles.ItemsSource = MarkingSettings.Profiles().Select(p => p.Name).ToList();
             _profiles.SelectedItem = MarkingSettings.Current().Name;
+            JournalSettings journal = MarkingSettings.ReadAccount().Journal;
+            _apsPercent.Text = Text(journal.ApsPercent);
+            _securityPercent.Text = Text(journal.SecurityPercent);
+            _souyePercent.Text = Text(journal.SouyePercent);
+            _lineReserve.Text = Text(journal.LineReserveM);
             _rows = MarkingSettings.ForDocument(_doc);
             _table.ItemsSource = _rows;
             _reloading = false;
@@ -108,7 +133,13 @@ namespace PluginForRevit2022
         private void Store()
         {
             _table.CommitEdit(DataGridEditingUnit.Row, true);
-            MarkingSettings.Save(_rows);
+            MarkingSettings.Save(_rows, new JournalSettings
+            {
+                ApsPercent = Read(_apsPercent),
+                SecurityPercent = Read(_securityPercent),
+                SouyePercent = Read(_souyePercent),
+                LineReserveM = Read(_lineReserve),
+            });
         }
 
         private void SaveProfile() => Store();
@@ -148,6 +179,20 @@ namespace PluginForRevit2022
             if (MessageBox.Show(this, $"Удалить профиль «{name}» из списка?", Title, MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
             MarkingSettings.Delete(name);
             Reload();
+        }
+
+        private static TextBox Number() => new TextBox { Width = 48, TextAlignment = TextAlignment.Right };
+
+        private static string Text(double value) => value.ToString(System.Globalization.CultureInfo.CurrentCulture);
+
+        private static double Read(TextBox box)
+        {
+            string text = box.Text.Trim().Replace(',', '.');
+            if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value))
+            {
+                throw new ArgumentException("Запасы кабеля должны быть числами.");
+            }
+            return value;
         }
 
         private void Guarded(Action action)

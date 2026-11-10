@@ -168,8 +168,17 @@ namespace PluginForRevit2022.Mcp
                 {
                     Name = f.String("name"),
                     Bco = f.String("bco"),
-                    InLine = f.Bool("inLine") ?? true,
-                }).ToList()));
+                    Aps = f.Bool("aps") ?? false,
+                    Security = f.Bool("security") ?? false,
+                    Souye = f.Bool("souye") ?? false,
+                }).ToList(),
+                args.Double("lineReserveM") == null ? null : new JournalSettings
+                {
+                    ApsPercent = args.Double("apsPercent") ?? 30,
+                    SecurityPercent = args.Double("securityPercent") ?? 30,
+                    SouyePercent = args.Double("souyePercent") ?? 40,
+                    LineReserveM = args.Double("lineReserveM").Value,
+                }));
 
             Register("select_marking_profile", (app, args) =>
             {
@@ -186,6 +195,14 @@ namespace PluginForRevit2022.Mcp
                 MarkingSettings.AddFromFile(args.String("path"));
                 return MarkingSettings.ToResult(ActiveProject(app));
             });
+
+            // Правка размеченной линии
+            Register("add_device_to_line", (app, args) => DeviceLineOperations.Add(ActiveProject(app),
+                args.Long("afterId") ?? throw new ArgumentException("Укажите afterId."),
+                args.Long("deviceId") ?? throw new ArgumentException("Укажите deviceId."),
+                args.Bool("dryRun") ?? true));
+            Register("remove_devices_from_line", (app, args) => DeviceLineOperations.Remove(ActiveProject(app),
+                args.StringList("ids").Select(long.Parse).ToList(), args.Bool("dryRun") ?? true));
 
             // Марки помещений
             Register("list_room_tag_types", (app, args) => new Dictionary<string, object>

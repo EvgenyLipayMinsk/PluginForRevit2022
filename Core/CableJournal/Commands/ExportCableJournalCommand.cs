@@ -70,7 +70,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // ---------------------------------------------------------
                 LengthMode mode = LengthMode.Route;
 
-                var builder = new SecurityCableRecordBuilder(parser, doc, mode, 1.3);
+                var builder = new SecurityCableRecordBuilder(parser, doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("security"));
                 List<CableRecord> records = builder.Build(controllers);
 
                 if (records.Count == 0)
@@ -95,6 +95,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // 6. Экспорт в Excel
                 // ---------------------------------------------------------
                 var exporter = new ExcelExporter();
+                PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
                 exporter.ExportCableRecords(templatePath, savePath, records);
 
                 // ---------------------------------------------------------

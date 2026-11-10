@@ -284,7 +284,7 @@ namespace ARBM.CableJournalExporter.Commands
                 var innerCalculator = loggedCalculator.Inner;  // ✓ Получаем доступ к внутреннему объекту
 
                 // Или используем логированный кальулятор напрямую с SouyeCableRecordBuilder
-                var builder = new SouyeCableRecordBuilder(doc, mode, 1.4);
+                var builder = new SouyeCableRecordBuilder(doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("souye"));
 
                 SouyeBuildResult buildResult = null;
                 try
@@ -359,6 +359,7 @@ namespace ARBM.CableJournalExporter.Commands
                 var exporter = new ExcelExporter();
                 try
                 {
+                    PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
                     exporter.ExportCableRecords(templatePath, outputPath, records);
                 }
                 finally

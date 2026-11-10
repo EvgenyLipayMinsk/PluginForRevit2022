@@ -24,31 +24,39 @@ namespace PluginForRevit2022
             UIDocument uiDoc = commandData.Application.ActiveUIDocument;
             Document doc = uiDoc.Document;
 
-            const string windowKey = "mark-devices";
-            MarkDevicesRequest request = SessionWindows.Input<MarkDevicesRequest>(windowKey);
-            if (request == null)
+            var window = new MarkDevicesWindow();
+            new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
+            if (window.ShowDialog() != true)
             {
-                var window = new MarkDevicesWindow();
-                new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
-                if (window.ShowDialog() != true)
-                {
-                    return Result.Cancelled;
-                }
-                request = window.Request;
-                if (window.DontShowAgain) SessionWindows.Hide(windowKey, request);
+                return Result.Cancelled;
+            }
+            MarkDevicesRequest request = window.Request;
+
+            if (!MarkingSettings.Load().AnyInLine(request.System))
+            {
+                TaskDialog.Show("Маркировка", "В настройках маркировки нет семейств с галочкой этой системы. Отметьте их кнопкой «Настройки маркировки».");
+                return Result.Cancelled;
             }
 
             try
             {
                 if (request.Order == "route")
                 {
-                    Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, от которого идёт линия");
+                    SessionWindows.Inform("mark-route-hint", "Маркировка",
+                        $"Перед маркировкой: в семействах кабеля (трассах) задайте в параметре «Комментарии» значение «{request.Comments}».\n\n" +
+                        "Шаг 1: кликните прибор (категория «Электрооборудование»), от которого идёт линия.\n\n" +
+                        "Шаг 2: выделите устройства линии и нажмите «Готово» на панели параметров вверху окна Revit.\n\n" +
+                        "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
+                    Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, от которого идёт линия");
                     request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
                     IList<Reference> picked = uiDoc.Selection.PickObjects(ObjectType.Element, DeviceFilter(request.System), "Выберите устройства шлейфа и нажмите «Готово»");
                     request.Ids = picked.Select(r => RevitIds.IdOf(r.ElementId)).ToList();
                 }
                 else
                 {
+                    SessionWindows.Inform("mark-manual-hint", "Маркировка",
+                        "Кликайте устройства по порядку номеров. Чтобы закончить выбор, нажмите Esc.\n\n" +
+                        "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
                     request.Ids = PickInOrder(uiDoc, DeviceFilter(request.System));
                 }
             }
@@ -71,13 +79,15 @@ namespace PluginForRevit2022
                     return Result.Failed;
                 }
                 var devices = (List<Dictionary<string, object>>)preview["devices"];
-                string list = string.Join(", ", devices.Take(30).Select(d => $"{d["number"]}: id {d["id"]}"));
-                if (TaskDialog.Show("Маркировка", $"Разметить устройств: {devices.Count}?\n\n{list}", TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No) != TaskDialogResult.Yes)
+                string info = $"Система: {window.SystemTitle}\nПрибор: {request.Controller}, линия: {request.Line}\nНомера: {devices.First()["number"]}–{devices.Last()["number"]}\nЗанято адресов на линии: {preview["lineAddresses"]} из {preview["lineCapacity"]}";
+                var warnings = (List<string>)preview["warnings"];
+                if (warnings.Count > 0) info += "\n\nВнимание:\n" + string.Join("\n", warnings.Take(5));
+                if (!SessionWindows.Confirm("mark-devices-confirm", "Маркировка", $"Разметить устройств: {devices.Count}?\n\n{info}"))
                 {
                     return Result.Cancelled;
                 }
                 request.DryRun = false;
-                TaskDialog.Show("Маркировка", (string)DeviceMarkingOperations.Mark(doc, request)["summary"]);
+                SessionWindows.Inform("mark-devices-result", "Маркировка", (string)DeviceMarkingOperations.Mark(doc, request)["summary"]);
                 return Result.Succeeded;
             }
             catch (Exception ex)
@@ -110,9 +120,9 @@ namespace PluginForRevit2022
         {
             switch (system)
             {
-                case "aps": return new CategoryFilter(BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices);
-                case "souye": return new CategoryFilter(BuiltInCategory.OST_NurseCallDevices);
-                default: return new CategoryFilter(BuiltInCategory.OST_DataDevices);
+                case "aps": return new CategoryFilter(system, BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices);
+                case "souye": return new CategoryFilter(system, BuiltInCategory.OST_NurseCallDevices);
+                default: return new CategoryFilter(system, BuiltInCategory.OST_DataDevices);
             }
         }
 
@@ -120,15 +130,17 @@ namespace PluginForRevit2022
         {
             private readonly HashSet<long> _categories;
             private readonly MarkingSettings _settings = MarkingSettings.Load();
+            private readonly string _system;
 
-            public CategoryFilter(params BuiltInCategory[] categories)
+            public CategoryFilter(string system, params BuiltInCategory[] categories)
             {
+                _system = system;
                 _categories = new HashSet<long>(categories.Select(c => (long)c));
             }
 
             public bool AllowElement(Element element) =>
                 element is FamilyInstance instance && element.Category != null && _categories.Contains(RevitIds.IdOf(element.Category.Id)) &&
-                _settings.IsInLine(instance.Symbol.FamilyName);
+                (_system == null || _settings.IsInLine(instance.Symbol.FamilyName, _system));
 
             public bool AllowReference(Reference reference, XYZ position) => false;
         }
@@ -147,11 +159,9 @@ namespace PluginForRevit2022
         private readonly TextBox _floor = new TextBox();
         private readonly TextBox _start = new TextBox { Text = "1" };
 
-        private readonly System.Windows.Controls.CheckBox _dontShow = SessionWindows.NewCheckBox();
-
         public MarkDevicesRequest Request { get; private set; }
 
-        public bool DontShowAgain => _dontShow.IsChecked == true;
+        public string SystemTitle => (string)((ComboBoxItem)_system.SelectedItem).Content;
 
         public MarkDevicesWindow()
         {
@@ -180,7 +190,6 @@ namespace PluginForRevit2022
 
             var ok = new Button { Content = "Далее: выбрать устройства", IsDefault = true, Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(6) };
             ok.Click += (s, e) => Accept();
-            panel.Children.Add(_dontShow);
             panel.Children.Add(ok);
             Content = panel;
             LoadLast();

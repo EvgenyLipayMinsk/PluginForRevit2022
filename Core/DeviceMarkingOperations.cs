@@ -37,12 +37,13 @@ namespace PluginForRevit2022.Core
     /// <summary>Заполняет параметры устройств так, как их читает кабельный журнал.</summary>
     internal static class DeviceMarkingOperations
     {
-        private const string ParamBuilding = "ARBM_Корпус";
-        private const string ParamController = "ARBM_Номер прибора";
-        private const string ParamBco = "ARBM_ПСБ_БЦО";
-        private const string ParamLine = "ARBM_Номер линии";
-        private const string ParamAddress = "ARBM_ПСБ_Адрес устройства";
-        private const string ParamMark = "ARBM_SP_ElementMark";
+        internal const string ParamBuilding = "ARBM_Корпус";
+        internal const string ParamController = "ARBM_Номер прибора";
+        internal const string ParamBco = "ARBM_ПСБ_БЦО";
+        internal const string ParamLine = "ARBM_Номер линии";
+        internal const string ParamAddress = "ARBM_ПСБ_Адрес устройства";
+        internal const string ParamMark = "ARBM_SP_ElementMark";
+        internal const int LineCapacity = 250;
 
         public static Dictionary<string, object> Mark(Document doc, MarkDevicesRequest request)
         {
@@ -60,12 +61,12 @@ namespace PluginForRevit2022.Core
             List<FamilyInstance> devices = ResolveDevices(doc, request.Ids);
             var warnings = new List<string>();
             MarkingSettings settings = MarkingSettings.Load();
-            List<FamilyInstance> excluded = devices.Where(d => !settings.IsInLine(d.Symbol.FamilyName)).ToList();
+            List<FamilyInstance> excluded = devices.Where(d => !settings.IsInLine(d.Symbol.FamilyName, system)).ToList();
             if (excluded.Count > 0)
             {
-                warnings.Add($"исключены настройкой «В линии КЖ»: {excluded.Count} ({string.Join(", ", excluded.Select(d => d.Symbol.FamilyName).Distinct())})");
+                warnings.Add($"нет галочки системы в настройках маркировки, исключены: {excluded.Count} ({string.Join(", ", excluded.Select(d => d.Symbol.FamilyName).Distinct())})");
                 devices = devices.Except(excluded).ToList();
-                if (devices.Count == 0) throw new InvalidOperationException("Все выбранные устройства исключены настройкой «В линии КЖ».");
+                if (devices.Count == 0) throw new InvalidOperationException("Ни у одного выбранного семейства нет галочки этой системы в настройках маркировки.");
             }
             string order = (request.Order ?? "manual").Trim().ToLowerInvariant();
             if (order == "route")
@@ -143,6 +144,12 @@ namespace PluginForRevit2022.Core
                 }
             }
 
+            int occupied = devices.Count + OtherDevicesOnLine(doc, system, request, devices);
+            if (occupied > LineCapacity)
+            {
+                warnings.Add($"на линии {occupied} адресов при ёмкости {LineCapacity}");
+            }
+
             bool applied = !request.DryRun && failures.Count == 0;
             return new Dictionary<string, object>
             {
@@ -150,6 +157,8 @@ namespace PluginForRevit2022.Core
                 ["applied"] = applied,
                 ["system"] = system,
                 ["order"] = order,
+                ["lineAddresses"] = occupied,
+                ["lineCapacity"] = LineCapacity,
                 ["devices"] = changes,
                 ["failures"] = failures.Distinct().Take(100).ToList(),
                 ["warnings"] = warnings.Distinct().Take(50).ToList(),
@@ -159,6 +168,21 @@ namespace PluginForRevit2022.Core
                         ? $"Предпросмотр: будет размечено устройств: {changes.Count}. Для записи повторите с dryRun=false."
                         : $"Размечено устройств: {changes.Count}. Отменить можно в Revit через Ctrl+Z.",
             };
+        }
+
+        /// <summary>Устройства проекта, уже записанные на эту линию и не входящие в текущую маркировку.</summary>
+        private static int OtherDevicesOnLine(Document doc, string system, MarkDevicesRequest r, List<FamilyInstance> selected)
+        {
+            var ids = new HashSet<long>(selected.Select(d => RevitIds.IdOf(d.Id)));
+            var categories = new List<BuiltInCategory> { BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices, BuiltInCategory.OST_NurseCallDevices };
+            string Value(Element e, string name) => e.LookupParameter(name)?.AsString()?.Trim();
+            string address = $"{r.Controller.Trim()}.{r.Line.Trim()}";
+
+            return new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories))
+                .WhereElementIsNotElementType().OfType<FamilyInstance>()
+                .Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) && (system == "aps"
+                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim()
+                    : Value(e, ParamAddress) == address));
         }
 
         private static Dictionary<string, string> ValuesFor(string system, MarkDevicesRequest r, string mark, string bco)
@@ -182,7 +206,7 @@ namespace PluginForRevit2022.Core
             }
         }
 
-        private static string FloorOf(Document doc, FamilyInstance device, string explicitFloor)
+        internal static string FloorOf(Document doc, FamilyInstance device, string explicitFloor)
         {
             if (!string.IsNullOrWhiteSpace(explicitFloor)) return explicitFloor.Trim();
             string level = (doc.GetElement(device.LevelId) as Level)?.Name;

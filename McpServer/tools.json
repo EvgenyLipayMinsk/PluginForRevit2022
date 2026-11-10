@@ -1426,7 +1426,7 @@
     {
       "name": "export_cable_journal",
       "title": "Export cable journal",
-      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false also needs templatePath and savePath, writes the file and opens it. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running.",
+      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false also needs templatePath and savePath, writes the file and opens it. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running. Cable reserves come from the current settings profile.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1479,7 +1479,7 @@
     {
       "name": "mark_devices",
       "title": "Mark devices for the cable journal",
-      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) and needs routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families that are not in the line.",
+      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) and needs routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1673,7 +1673,7 @@
     {
       "name": "get_marking_settings",
       "title": "Read marking settings",
-      "description": "Returns the settings profiles (settings containers, no login or password), the current profile, BCO per family and whether a family takes part in the cable journal line.",
+      "description": "Returns the settings profiles, the current profile, BCO per family and which systems (aps, security, souye) a family takes part in.",
       "inputSchema": {
         "type": "object",
         "properties": {}
@@ -1685,12 +1685,10 @@
     {
       "name": "set_marking_settings",
       "title": "Save marking settings",
-      "description": "Saves marking settings for the listed families in the current profile; other families are kept. Changes a JSON file, not the Revit project.",
+      "description": "Saves marking settings for the listed families in the current profile; each listed family is replaced entirely, other families are kept. Only families ticked for a system take part in its lines. Changes a JSON file, not the Revit project.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "families"
-        ],
+        "required": [],
         "properties": {
           "families": {
             "type": "array",
@@ -1708,13 +1706,39 @@
                   "type": "string",
                   "description": "BCO for this family; empty = value from marking."
                 },
-                "inLine": {
+                "aps": {
                   "type": "boolean",
-                  "default": true,
-                  "description": "Takes part in the cable journal line."
+                  "default": false,
+                  "description": "Family takes part in АПС lines."
+                },
+                "security": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Family takes part in СОТС lines."
+                },
+                "souye": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Family takes part in СОУЭ lines."
                 }
               }
             }
+          },
+          "apsPercent": {
+            "type": "number",
+            "description": "Cable reserve for APS, %."
+          },
+          "securityPercent": {
+            "type": "number",
+            "description": "Cable reserve for security (СОТС), %."
+          },
+          "souyePercent": {
+            "type": "number",
+            "description": "Cable reserve for SOUYE, %."
+          },
+          "lineReserveM": {
+            "type": "number",
+            "description": "Metres added to every journal row. Passing it saves all reserves (missing percents reset to 30/30/40)."
           }
         }
       }
@@ -1766,6 +1790,58 @@
           "name": {
             "type": "string",
             "description": "Profile name from get_marking_settings."
+          }
+        }
+      }
+    },
+    {
+      "name": "add_device_to_line",
+      "title": "Add device to a marked line",
+      "description": "Inserts a device into an already marked line after afterId, copying the line parameters; following numbers shift by one. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "afterId",
+          "deviceId"
+        ],
+        "properties": {
+          "afterId": {
+            "type": "integer",
+            "description": "Marked device after which to insert."
+          },
+          "deviceId": {
+            "type": "integer",
+            "description": "Device to insert."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_devices_from_line",
+      "title": "Remove devices from a marked line",
+      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Model elements and the floor are not changed. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device element ids."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
           }
         }
       }

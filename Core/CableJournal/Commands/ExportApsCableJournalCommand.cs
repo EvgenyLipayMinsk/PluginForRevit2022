@@ -169,7 +169,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // Перед построением графов и расчётом длин указываем операцию
                 cancelMonitor.SetCurrentOperation("BuildRecordsAndGraphs");
 
-                var builder = new ApsCableRecordBuilder(new ApsElementParser(), doc, mode, 1.3);
+                var builder = new ApsCableRecordBuilder(new ApsElementParser(), doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("aps"));
                 List<CableRecord> records = null;
                 try
                 {
@@ -218,6 +218,7 @@ namespace ARBM.CableJournalExporter.Commands
                 cancelMonitor.SetCurrentOperation("ExportToExcel");
                 try
                 {
+                    PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
                     exporter.ExportCableRecords(templatePath, savePath, records);
                 }
                 finally

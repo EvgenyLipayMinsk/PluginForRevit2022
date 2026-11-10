@@ -323,7 +323,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // • doc — Revit document for access to geometry and levels
                 // • mode — cable length calculation mode
                 // • 1.3 — safety factor for cable length (30% more than calculated)
-                var builder = new SecurityCableRecordBuilder(parser, doc, mode, 1.3);
+                var builder = new SecurityCableRecordBuilder(parser, doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("security"));
                 
                 // Строим список CableRecord из собранных контроллеров
                 // Для каждого контроллера, петли и устройства создаётся CableRecord с:
@@ -383,6 +383,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // 2. Fill data from records into corresponding cells
                 // 3. Apply formatting (if defined in template)
                 // 4. Save result to savePath
+                PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
                 exporter.ExportCableRecords(templatePath, savePath, records);
 
                 // =================================================================

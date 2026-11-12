@@ -207,7 +207,7 @@ namespace PluginForRevit2022
                 HashSet<long> members = DeviceLineOperations.MemberIds(doc, line.Key);
 
                 SessionWindows.Inform("line-remove-hint", Caption,
-                    "Выделите устройства линии и нажмите «Готово» на панели параметров. Сами элементы модели не удаляются: снимается только маркировка.");
+                    "Выделите устройства линии и нажмите «Готово» на панели параметров. Сами элементы модели не удаляются: снимаются маркировка и «Комментарии» (устройство выходит из журнала), этаж и ЗКПС остаются.");
                 List<long> ids = uiDoc.Selection.PickObjects(ObjectType.Element, new LineDeviceFilter(members), "Устройства линии, которые снять")
                     .Select(r => RevitIds.IdOf(r.ElementId)).ToList();
                 if (ids.Count == 0) return Result.Cancelled;

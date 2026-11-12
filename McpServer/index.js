@@ -39,6 +39,7 @@ const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
 class RevitConnection {
   constructor(port) {
+    this.tail = Promise.resolve();
     this.port = port;
     this.socket = null;
     this.connecting = null;
@@ -82,6 +83,7 @@ class RevitConnection {
         if (this.socket === socket) this.socket = null;
         for (const [, entry] of this.pending) {
           clearTimeout(entry.timer);
+          entry.finish();
           entry.reject(new Error("Connection to Revit closed before the command finished."));
         }
         this.pending.clear();
@@ -110,22 +112,46 @@ class RevitConnection {
     if (!entry) return;
     this.pending.delete(message.RequestId);
     clearTimeout(entry.timer);
+    entry.finish();
+    if (entry.timedOut) {
+      console.error(`[aerbim] '${entry.commandName}' finished in Revit after the client timeout (${message.Success ? "success" : "error"}).`);
+      return;
+    }
     if (message.Success) entry.resolve(message.Data);
     else entry.reject(new Error(message.Error || "Command failed in Revit."));
   }
 
-  async send(commandName, parameters = {}, timeoutMs = COMMAND_TIMEOUT_MS) {
+  /**
+   * Revit выполняет команды по одной (очередь ExternalEvent), поэтому и здесь они уходят по одной:
+   * следующая отправляется, когда Revit ответил на предыдущую. Таймаут считается от отправки этой команды,
+   * а не от момента вызова — короткая команда за журналом не получает ложный отказ.
+   * Команда, не уложившаяся в таймаут, продолжает выполняться в Revit; следующие ждут её окончания.
+   */
+  send(commandName, parameters = {}, timeoutMs = COMMAND_TIMEOUT_MS) {
+    const run = this.tail.then(() => this.dispatch(commandName, parameters, timeoutMs));
+    this.tail = run.then((r) => r.done, () => {});
+    return run.then((r) => r.result);
+  }
+
+  async dispatch(commandName, parameters, timeoutMs) {
     await this.ensureConnected();
     const requestId = randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(requestId);
+    let finish;
+    const done = new Promise((r) => { finish = r; });
+    const result = new Promise((resolve, reject) => {
+      const entry = { resolve, reject, finish, commandName, timedOut: false, timer: null };
+      entry.timer = setTimeout(() => {
+        entry.timedOut = true; // ответ ещё придёт: запись остаётся, чтобы следующая команда дождалась его
+        // но не дольше 10 минут после таймаута: Revit мог потерять ответ — очередь не должна встать навсегда
+        setTimeout(() => entry.finish(), 10 * 60 * 1000);
         reject(new Error(`Revit did not answer '${commandName}' within ${timeoutMs / 1000} s. ` +
-          "Revit may be busy or showing a modal dialog."));
+          "The command may still be running in Revit (or a modal dialog is open); further commands wait until it finishes. " +
+          "Do not repeat a write command — check the model first."));
       }, timeoutMs);
-      this.pending.set(requestId, { resolve, reject, timer });
+      this.pending.set(requestId, entry);
       this.socket.send(JSON.stringify({ CommandName: commandName, Parameters: parameters, RequestId: requestId }));
     });
+    return { result, done };
   }
 }
 
@@ -176,7 +202,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const args = prepareArguments(tool, request.params.arguments);
     // Долгие инструменты задают свой лимит; пакет по видам получает его на каждый вид.
     const timeoutMs = tool.timeoutSeconds
-      ? tool.timeoutSeconds * 1000 * Math.max(1, Array.isArray(args.views) ? args.views.length : 1)
+      ? tool.timeoutSeconds * 1000 * Math.max(1, (Array.isArray(args.views) ? args.views.length : Array.isArray(args.toViews) ? args.toViews.length : 1))
       : COMMAND_TIMEOUT_MS;
     const data = await revit.send(tool.command || tool.name, args, timeoutMs);
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };

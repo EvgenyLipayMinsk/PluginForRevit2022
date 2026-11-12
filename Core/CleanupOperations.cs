@@ -174,14 +174,25 @@ namespace PluginForRevit2022.Core
                 {
                     if (!element.IsValidObject) continue; // удалён вместе с предыдущим (например, семейство вместе с последним типом)
                     string label = kind == "types" ? OpsCommon.TypeLabel(doc, element.Id) : element.Name;
+                    ElementId id = element.Id; // после удаления элемент недоступен — id запоминается заранее
+                    ElementId familyId = (element as FamilySymbol)?.Family?.Id ?? ElementId.InvalidElementId; // уходит вместе с последним типом
                     using (var sub = new SubTransaction(doc))
                     {
                         sub.Start();
                         try
                         {
-                            doc.Delete(element.Id);
+                            ICollection<ElementId> removed = doc.Delete(id);
+                            // Тип, при удалении которого Revit удаляет и другие элементы, на самом деле используется
+                            // (ссылки из других типов, вложенные семейства) — не трогаем.
+                            int others = kind == "types" ? removed.Count(r => r != id && r != familyId) : 0;
+                            if (others > 0)
+                            {
+                                sub.RollBack();
+                                skipped.Add($"{label}: вместе с ним удалились бы ещё элементы ({others}) — тип используется");
+                                continue;
+                            }
                             sub.Commit();
-                            deleted.Add(new Dictionary<string, object> { ["kind"] = kind, ["id"] = RevitIds.IdOf(element.Id), ["name"] = label });
+                            deleted.Add(new Dictionary<string, object> { ["kind"] = kind, ["id"] = RevitIds.IdOf(id), ["name"] = label });
                         }
                         catch (Exception ex)
                         {

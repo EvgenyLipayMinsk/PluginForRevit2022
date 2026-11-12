@@ -160,6 +160,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             // Delegate graph construction (uses LoggedRouteLengthCalculator which supports a cancellation-aware API)
             _routeCalculator.BuildGraphsByLevel(_doc, data, param, cancel);
 
+            // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
+            if (_routeCalculator.BuildError != null)
+                return SouyeBuildResult.Failure($"Граф трасс не построен: {_routeCalculator.BuildError}. Журнал не сформирован.");
+
             cancel?.ClearCurrentOperation();
 
             foreach (var loopGroup in data.LoopGroups)
@@ -233,6 +237,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             double totalLength = 0.0;
             foreach (var segment in segmentLengths)
                 totalLength += segment.LengthMeters;
+
+            // Запас на линию добавляется к каждой строке журнала уже после подбора (ApplyLineReserve),
+            // поэтому сечение подбирается по длине вместе с этим запасом — той, что попадёт в журнал.
+            totalLength += PluginForRevit2022.Core.MarkingSettings.LineReserveM() * segmentLengths.Count;
 
             // ── Шаг 3: рассчитать требуемое сечение кабеля ───────────────────────
             double calculatedSection = SouyeCableCatalog.CalculateCrossSection(
@@ -387,6 +395,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 {
                     // Преобразуем из футов в метры, умножаем на коэффициент корректировки и округляем в большую сторону
                     result.LengthMeters = Math.Ceiling(lengthFeet * 0.3048 * _correctionFactor);
+                    // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
+                    if (_routeCalculator.LastRouteBridged) result.IsFallbackForLength = true;
                 }
             }
 

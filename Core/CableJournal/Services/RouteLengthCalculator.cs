@@ -1213,6 +1213,7 @@ namespace ARBM.CableJournalExporter.Services
 
         public void BuildGraphsByLevel(Document doc, List<ControllerWithLoops> controllers, string filterParam = "", Func<Element, bool> routeFilter = null)
         {
+            BuildError = null;
             // Кэшируем уровни Revit в локальную структуру.
             // EN: Cache all Revit levels into internal dictionary.
             CacheLevels(doc);
@@ -1317,7 +1318,10 @@ namespace ARBM.CableJournalExporter.Services
             }
             // ✅ ВАЛИДАЦИЯ: трассы
             if (!SecurityDataValidator.ValidateRoutes(allRoutes))
+            {
+                BuildError = "трассы не прошли проверку";
                 return;
+            }
             // --- Шаг 1.5: Добавить семейства переходов
             // EN: Add transition families as nodes.
             AddTransitionFamilies(doc);
@@ -1415,6 +1419,7 @@ namespace ARBM.CableJournalExporter.Services
                                     // Показываем ошибку структуры уровней.
                                     // EN: Show validation error.
                                     TaskDialog.Show("Ошибка структуры уровней", validationError);
+                                    BuildError = validationError;
                                     return;
                                 }
                             }
@@ -1497,6 +1502,7 @@ namespace ARBM.CableJournalExporter.Services
                             if (validationError != null)
                             {
                                 TaskDialog.Show("Ошибка структуры уровней", validationError);
+                                BuildError = validationError;
                                 return;
                             }
                         }
@@ -1632,6 +1638,7 @@ namespace ARBM.CableJournalExporter.Services
         /// </param>
         public void BuildGraphsByLevel(Document doc, List<ApsControllerWithLoops> controllers, string filterParam = "")
         {
+            BuildError = null;
             // ============================================================
             // 0. Cache levels and reset internal structures
             // ============================================================
@@ -1696,7 +1703,10 @@ namespace ARBM.CableJournalExporter.Services
             }
 
             if (!SecurityDataValidator.ValidateRoutes(allRoutes))
+            {
+                BuildError = "трассы не прошли проверку";
                 return;
+            }
 
             // ============================================================
             // 2. Add transition families
@@ -1765,6 +1775,7 @@ namespace ARBM.CableJournalExporter.Services
                             if (validationError != null)
                             {
                                 TaskDialog.Show("Ошибка структуры уровней", validationError);
+                                BuildError = validationError;
                                 return;
                             }
                         }
@@ -1853,6 +1864,7 @@ namespace ARBM.CableJournalExporter.Services
         /// </param>
         public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "")
         {
+            BuildError = null;
             // ============================================================
             // 0. Cache levels and reset internal structures
             // ============================================================
@@ -1994,6 +2006,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         if (validationError != null)
                         {
                             TaskDialog.Show("Ошибка структуры уровней", validationError);
+                            BuildError = validationError;
                             return;
                         }
                     }
@@ -2737,8 +2750,21 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
         /// <para><b>RU:</b> Длина кратчайшего маршрута или <c>double.PositiveInfinity</c>, если маршрут не найден.</para>
         /// </returns>
 
+        /// <summary>
+        /// Последний расчёт прошёл через «мост» — прямую вставку между несвязанными частями графа трасс.
+        /// Такая длина не по трассе: журнал помечает её как длину по прямой (жёлтым).
+        /// </summary>
+        public bool LastRouteBridged { get; private set; }
+
+        /// <summary>
+        /// Граф не построен до конца (ошибка структуры уровней, переходов или трасс) — окно уже показано.
+        /// Журнал по такому графу не строится: длины пошли бы по прямой без предупреждения.
+        /// </summary>
+        public string BuildError { get; private set; }
+
         public double ComputeShortestRouteBetweenDevices(Element start, Element end, string ExpanderId = "")
         {
+            LastRouteBridged = false;
             try
             {
                 // Проверяем, что стартовый элемент не null.
@@ -2989,8 +3015,12 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         // 3. Создаём мост между компонентами
                         var bridge = graph.ConnectComponents(breakNode, endSideNode);
 
-                        // 4. Повторяем поиск пути после восстановления связности
+                        // 4. Повторяем поиск пути после восстановления связности.
+                        // Мост нужен только этому участку: он убирается, чтобы не менять длины следующих участков,
+                        // а длина помечается как не по трассе.
                         result = graph.FindShortestPath(startNode, endNode);
+                        graph.RemoveEdge(bridge);
+                        LastRouteBridged = !double.IsPositiveInfinity(result);
 
                         if (double.IsPositiveInfinity(result))
                         {

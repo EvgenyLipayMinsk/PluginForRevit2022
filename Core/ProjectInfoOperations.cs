@@ -151,6 +151,17 @@ namespace PluginForRevit2022.Core
         {
             var used = new HashSet<long>(new FilteredElementCollector(doc).WhereElementIsNotElementType()
                 .Select(e => e.GetTypeId()).Where(id => id != ElementId.InvalidElementId).Select(RevitIds.IdOf));
+            // Тип без экземпляров может быть нужен другим типам: панели и импосты витражей, профили,
+            // вложенные семейства в параметрах «Тип семейства». Такие ссылки — параметры-ElementId типов.
+            foreach (ElementType type in new FilteredElementCollector(doc).WhereElementIsElementType().Cast<ElementType>())
+            {
+                foreach (Parameter parameter in type.Parameters)
+                {
+                    if (parameter.StorageType != StorageType.ElementId) continue;
+                    ElementId reference = parameter.AsElementId();
+                    if (reference != null && reference != ElementId.InvalidElementId && reference != type.Id) used.Add(RevitIds.IdOf(reference));
+                }
+            }
             IEnumerable<FamilySymbol> symbols = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>();
             if (categories != null)
             {

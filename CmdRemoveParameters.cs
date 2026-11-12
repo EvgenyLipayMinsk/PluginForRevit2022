@@ -21,7 +21,12 @@ namespace PluginForRevit2022
 
             ElementClassFilter parametersFilter = new ElementClassFilter(typeof(ParameterElement));
 
-            Autodesk.Revit.DB.Document doc = commandData.Application.ActiveUIDocument.Document;
+            Autodesk.Revit.DB.Document doc = commandData.Application.ActiveUIDocument?.Document;
+            if (doc == null)
+            {
+                message = "Откройте проект.";
+                return Result.Failed;
+            }
 
             FilteredElementCollector collector = new FilteredElementCollector(doc);
 

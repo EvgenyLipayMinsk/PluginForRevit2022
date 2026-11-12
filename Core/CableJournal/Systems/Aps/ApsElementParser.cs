@@ -104,7 +104,7 @@ namespace ARBM.CableJournalExporter.Services
                     Capabilities = new ApsControllerCapabilities
                     {
                         MaxObjectLines = 2,
-                        MaxDevicesPerLine = 255
+                        MaxDevicesPerLine = PluginForRevit2022.Core.DeviceMarkingOperations.LineCapacity // R3: 250 адресов, как в маркировке
                     },
                     IsAddress = true
                 };

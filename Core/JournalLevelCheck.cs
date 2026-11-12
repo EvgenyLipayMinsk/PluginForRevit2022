@@ -18,6 +18,7 @@ namespace PluginForRevit2022.Core
         public static Dictionary<string, object> Run(Document doc, double attachMm)
         {
             double attach = (attachMm <= 0 ? 600 : attachMm) / 304.8;
+            CableWalk.ResetLevels();
             List<Level> levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
             string LevelName(long id) => id == -1 ? "нет уровня" : levels.FirstOrDefault(l => RevitIds.IdOf(l.Id) == id)?.Name ?? id.ToString();
 

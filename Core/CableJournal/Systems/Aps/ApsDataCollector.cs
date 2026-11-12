@@ -68,7 +68,7 @@ namespace ARBM.CableJournalExporter.Services
                     .Where(c =>
                     {
                         string comments = c.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
-                        return string.Equals(comments, param, StringComparison.OrdinalIgnoreCase);
+                        return string.Equals(comments?.Trim(), param?.Trim(), StringComparison.OrdinalIgnoreCase);
                     })
                     .ToList();
 
@@ -100,6 +100,10 @@ namespace ARBM.CableJournalExporter.Services
                     ShowInvalidControllerMessage(invalidControllers, param);
                     return result;
                 }
+                _skipped.Clear();
+                _skippedIds.Clear();
+                foreach (var c in allControllers.Except(controllersWithValidParams))
+                    _skipped.Add($"ПКП id {c.Id}: пустое «ARBM_ПС_Имя изделия» (или без ARK) или «ADSK_Этаж»");
 
                 if (cancel?.IsCancellationRequested == true)
                     throw new OperationCanceledException("Cancelled after validating controllers.");
@@ -125,15 +129,12 @@ namespace ARBM.CableJournalExporter.Services
                     .Where(d =>
                     {
                         string comments = d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
-                        if (!string.Equals(comments, param, StringComparison.OrdinalIgnoreCase))
+                        if (!string.Equals(comments?.Trim(), param?.Trim(), StringComparison.OrdinalIgnoreCase))
                             return false;
 
-                        return !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Корпус")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Номер прибора")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ADSK_Этаж")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_ПСБ_БЦО")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Номер линии")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_SP_ElementMark")?.AsString());
+                        string empty = EmptyDeviceParams(d);
+                        if (empty != null) _skipped.Add($"устройство id {d.Id}: не заполнено {empty}");
+                        return empty == null;
                     })
                     .ToList();
 
@@ -145,15 +146,12 @@ namespace ARBM.CableJournalExporter.Services
                     .Where(d =>
                     {
                         string comments = d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
-                        if (!string.Equals(comments, param, StringComparison.OrdinalIgnoreCase))
+                        if (!string.Equals(comments?.Trim(), param?.Trim(), StringComparison.OrdinalIgnoreCase))
                             return false;
 
-                        return !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Корпус")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Номер прибора")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ADSK_Этаж")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_ПСБ_БЦО")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_Номер линии")?.AsString()) &&
-                               !string.IsNullOrWhiteSpace(d.LookupParameter("ARBM_SP_ElementMark")?.AsString());
+                        string empty = EmptyDeviceParams(d);
+                        if (empty != null) _skipped.Add($"устройство id {d.Id}: не заполнено {empty}");
+                        return empty == null;
                     })
                     .ToList();
 
@@ -163,7 +161,10 @@ namespace ARBM.CableJournalExporter.Services
                     throw new OperationCanceledException("Cancelled after collecting devices.");
 
                 if (!devices.Any())
+                {
+                    ReportSkipped();
                     return result;
+                }
 
                 // =================================================================
                 // 1.7: Валидировать устройства АПС
@@ -190,6 +191,12 @@ namespace ARBM.CableJournalExporter.Services
                 // =================================================================
                 if (!_validator.ValidateApsControllersLoops(result))
                     return new List<ApsControllerWithLoops>();
+
+                // Устройства, не попавшие ни к одному ПКП (корпус или номер прибора не совпали — например «М» кириллицей)
+                var used = new HashSet<ElementId>(result.SelectMany(c => c.Loops).SelectMany(l => l.Devices).Select(x => x.BaseInfo?.Element?.Id).Where(id => id != null));
+                foreach (var d in devices.Where(d => !used.Contains(d.Id) && !_skippedIds.Contains(d.Id)))
+                    _skipped.Add($"устройство id {d.Id}: нет ПКП с корпусом «{d.LookupParameter("ARBM_Корпус")?.AsString()}» и номером прибора «{d.LookupParameter("ARBM_Номер прибора")?.AsString()}» (или имя этого ПКП не разобрано — см. выше)");
+                ReportSkipped();
 
                 return result
                     .OrderBy(c => c.ControllerId.BuildingNumber)
@@ -226,6 +233,25 @@ namespace ARBM.CableJournalExporter.Services
         /// 
         /// Добавлен optional параметр cancel для cooperative cancellation: метод периодически проверяет флаг.
         /// </summary>
+        // Что не попало в журнал и почему — одно сообщение в конце сбора (в MCP — в messages)
+        private readonly List<string> _skipped = new List<string>();
+        private readonly HashSet<ElementId> _skippedIds = new HashSet<ElementId>();
+
+        private static string EmptyDeviceParams(FamilyInstance d)
+        {
+            var empty = new[] { "ARBM_Корпус", "ARBM_Номер прибора", "ADSK_Этаж", "ARBM_ПСБ_БЦО", "ARBM_Номер линии", "ARBM_SP_ElementMark" }
+                .Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
+            return empty.Count == 0 ? null : string.Join(", ", empty);
+        }
+
+        private void ReportSkipped()
+        {
+            if (_skipped.Count == 0) return;
+            TaskDialog.Show("Журнал АПС: элементы не попали в журнал",
+                $"Не попали в журнал: {_skipped.Count}.\n\n" + string.Join("\n", _skipped.Take(40)) +
+                (_skipped.Count > 40 ? $"\n… и ещё {_skipped.Count - 40}" : ""));
+        }
+
         private List<ApsControllerWithLoops> GroupControllersWithDevices(
             List<FamilyInstance> controllers,
             List<FamilyInstance> devices,
@@ -248,7 +274,10 @@ namespace ARBM.CableJournalExporter.Services
                 // Парсим контроллер
                 var apsController = _parser.ParseController(controllerElement) as ApsController;
                 if (apsController == null)
+                {
+                    _skipped.Add($"ПКП id {controllerElement.Id} «{controllerElement.LookupParameter("ARBM_ПС_Имя изделия")?.AsString()}»: не разобрано имя или «ADSK_Этаж» не числом");
                     continue;
+                }
 
                 var controllerId = apsController.ControllerId;
 
@@ -269,10 +298,16 @@ namespace ARBM.CableJournalExporter.Services
                     continue;
 
                 // Парсим устройства
-                var parsedDevices = controllerDevices
-                    .Select(d => _parser.ParseDevice(d) as ApsDeviceInfo)
-                    .Where(d => d != null)
-                    .ToList();
+                var parsedDevices = new List<ApsDeviceInfo>();
+                foreach (var d in controllerDevices)
+                {
+                    if (_parser.ParseDevice(d) is ApsDeviceInfo info) parsedDevices.Add(info);
+                    else
+                    {
+                        _skipped.Add($"устройство id {d.Id}: «ADSK_Этаж», номер линии или номер в линии не числом");
+                        _skippedIds.Add(d.Id);
+                    }
+                }
 
                 if (!parsedDevices.Any())
                     continue;

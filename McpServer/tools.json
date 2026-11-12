@@ -912,6 +912,7 @@
     {
       "name": "tag_rooms",
       "title": "Tag rooms from linked models",
+      "timeoutSeconds": 600,
       "description": "Places room tags on a plan of the current project for rooms that live in linked models (and optionally in the project itself). Rooms are taken when the plan cut plane passes through the room volume (works when the plan level differs from the architectural level, e.g. above a raised floor), or explicitly by roomLevel, inside the crop region; rooms already tagged in this view are skipped. Tag at the room location point or the room box centre. dryRun defaults to true.",
       "inputSchema": {
         "type": "object",
@@ -1479,7 +1480,7 @@
     {
       "name": "mark_devices",
       "title": "Mark devices for the cable journal",
-      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. Cable routes are not changed: their floor (ADSK_Этаж, digits) is filled manually. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) using only cable routes of this line: ADSK_Группирование like СПС_АЛС.<controller>.<line> (e.g. СПС_АЛС.1.2 = controller 1, line 2); if no such routes exist, falls back to routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection.",
+      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. Cable routes are not changed: their floor (ADSK_Этаж, digits) is filled manually. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) using only cable routes of this line: ADSK_Группирование like СПС_АЛС.<controller>.<line> (e.g. СПС_АЛС.1.2 = controller 1, line 2); if no such routes exist, falls back to routes with the same Comments value. Devices are numbered in the order the line cable reaches them (cable assembled from its segments); this needs ADSK_Этаж (digits, filled manually) on every route of the line — otherwise a warning lists the routes without it and the order falls back to minimum cable length over the journal graph. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection. Parameters of another system left from earlier marking are cleared: aps clears ARBM_ПСБ_Адрес устройства; souye clears ARBM_Номер прибора and ARBM_Номер линии; security also clears ARBM_Корпус.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1738,7 +1739,7 @@
           },
           "lineReserveM": {
             "type": "number",
-            "description": "Metres added to every journal row. Passing it saves all reserves (missing percents reset to 30/30/40)."
+            "description": "Metres added to every journal row. Each reserve (the three percents and this) changes only when passed; the others keep their profile values."
           }
         }
       }
@@ -1797,7 +1798,7 @@
     {
       "name": "add_device_to_line",
       "title": "Add device to a marked line",
-      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true.",
+      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1827,7 +1828,7 @@
     {
       "name": "remove_devices_from_line",
       "title": "Remove devices from a marked line",
-      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Model elements and the floor are not changed. dryRun defaults to true. With line, all devices must belong to that line.",
+      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Model elements, the floor and ARBM_ЗКПС are not changed. dryRun defaults to true. With line, all devices must belong to that line.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1907,7 +1908,7 @@
       "name": "assign_zkps",
       "title": "Fill ARBM_ЗКПС from zones on plans",
       "timeoutSeconds": 300,
-      "description": "Fills ARBM_ЗКПС of APS devices (families ticked for АПС in the marking settings) from fire alarm control zones drawn on plans as detail groups whose name contains 'ЗК' (e.g. 'ЗКСПС_3_этаж'): the group's lines are zone boundaries, its text notes like 'ЗКСПС_3.21' are zone labels. Boundaries are rasterized (cellMm), each label's area is flood-filled; devices on the group view's level inside a zone get the label's number as written (ЗКСПС_3.21 → 3.21). Zones whose boundary is not closed are reported and skipped. The APS journal shows it as M2.8.BTH.1.27(3.21). dryRun defaults to true: get the user's confirmation before dryRun=false.",
+      "description": "Fills ARBM_ЗКПС of APS devices (families ticked for АПС in the marking settings) from fire alarm control zones drawn on plans as detail groups whose name contains 'ЗК' (e.g. 'ЗКСПС_3_этаж'): the group's lines are zone boundaries, its text notes like 'ЗКСПС_3.21' are zone labels. Boundaries are rasterized (cellMm), each label's area is flood-filled; devices on the group view's level inside a zone get the label's number as written (ЗКСПС_3.21 → 3.21). Zones whose boundary is not closed are reported and skipped (devices inside keep their value). On levels that have a zone group, devices outside all zones get their old ARBM_ЗКПС cleared; group views without a level (sections, 3D, drafting) are skipped. The APS journal shows it as M2.8.BTH.1.27(3.21). dryRun defaults to true: get the user's confirmation before dryRun=false.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2284,6 +2285,7 @@
     {
       "name": "analyze_model_statistics",
       "title": "Model statistics",
+      "timeoutSeconds": 600,
       "description": "Element counts by category and level, families, types, views, sheets, schedules, links, CAD imports, groups, warnings, file size.",
       "inputSchema": {
         "type": "object",
@@ -2296,6 +2298,7 @@
     {
       "name": "check_model_health",
       "title": "Model health",
+      "timeoutSeconds": 600,
       "description": "Conditional health score 0-100 and grade A-F from warnings, unused types, CAD imports, in-place families, views off sheets and file size, with recommendations.",
       "inputSchema": {
         "type": "object",
@@ -2613,6 +2616,7 @@
     {
       "name": "get_material_quantities",
       "title": "Material quantities",
+      "timeoutSeconds": 600,
       "description": "Sums material area (m²) and volume (m³) of the selected elements by material, with element counts. Useful as input for calculations such as SOUYE acoustics.",
       "inputSchema": {
         "type": "object",
@@ -2777,6 +2781,7 @@
     {
       "name": "copy_elements",
       "title": "Copy elements to views",
+      "timeoutSeconds": 120,
       "description": "Copies view elements (annotations, details, tags) from one view to other views in place. dryRun defaults to true.",
       "inputSchema": {
         "type": "object",
@@ -3088,6 +3093,7 @@
     {
       "name": "tag_equipment",
       "title": "Tag equipment",
+      "timeoutSeconds": 600,
       "description": "Tags equipment in a view that has no tag yet. Default categories: the plugin's devices (fire alarm, data, nurse call, communication, security, electrical equipment and fixtures, lighting devices, telephone). Uses the category's default tag type unless tagType is given; categories without a loaded tag family are reported. dryRun defaults to true: the preview only counts untagged elements per category and checks that a tag family is loaded (fast, nothing is created); the write creates all tags in one transaction and hides Revit warnings.",
       "inputSchema": {
         "type": "object",
@@ -3214,6 +3220,7 @@
     {
       "name": "purge_unused",
       "title": "Purge unused",
+      "timeoutSeconds": 600,
       "description": "Deletes unused items: family types without instances (optionally only in categories), view templates not used by any view, filters not applied to any view. Items Revit refuses to delete are skipped. dryRun defaults to true.",
       "inputSchema": {
         "type": "object",
@@ -3300,6 +3307,7 @@
     {
       "name": "get_room_surface_areas",
       "title": "Room surface areas",
+      "timeoutSeconds": 600,
       "description": "Floor, ceiling and wall areas (m²) of rooms from their geometry at the finish boundary, with door and window openings subtracted from their host walls, and a per-wall breakdown. Input for acoustic calculations (e.g. SOUYE reverberation). Up to 200 rooms per call.",
       "inputSchema": {
         "type": "object",

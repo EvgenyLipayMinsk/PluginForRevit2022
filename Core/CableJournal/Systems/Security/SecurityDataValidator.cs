@@ -107,6 +107,19 @@ namespace ARBM.CableJournalExporter.Services
                     $"   Найдено {kvp.Value.Count} контроллеров (IDs: {ids})");
             }
 
+            // Адрес прибора СОТС — «прибор.шлейф», без этажа: два контроллера с одним номером (ARK.1.2 и ARK.3.2)
+            // получили бы одни и те же приборы, и шлейфы в журнале задвоились бы.
+            foreach (var group in controllerNames
+                         .Select(kvp => (name: kvp.Key, ids: kvp.Value, number: kvp.Key.Split('.')))
+                         .Where(x => x.number.Length == 3 && int.TryParse(x.number[2], out _))
+                         .GroupBy(x => int.Parse(x.number[2]))
+                         .Where(g => g.Count() > 1))
+            {
+                errors.Add($"❌ Одинаковый номер контроллера {group.Key} у разных контроллеров:\n" +
+                    $"   {string.Join(", ", group.Select(x => $"'{x.name}' (ID: {string.Join(", ", x.ids.Select(id => id.ToString()))})"))}\n" +
+                    $"   Адрес прибора «прибор.шлейф» не указывает этаж, поэтому номер контроллера должен быть уникальным.");
+            }
+
             // Проверка 6: Наличие петель (если передана коллекция с Петлями)
             if (controllersWithLoops != null)
             {

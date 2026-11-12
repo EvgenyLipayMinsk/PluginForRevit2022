@@ -172,13 +172,7 @@ namespace PluginForRevit2022.Mcp
                     Security = f.Bool("security") ?? false,
                     Souye = f.Bool("souye") ?? false,
                 }).ToList(),
-                args.Double("lineReserveM") == null ? null : new JournalSettings
-                {
-                    ApsPercent = args.Double("apsPercent") ?? 30,
-                    SecurityPercent = args.Double("securityPercent") ?? 30,
-                    SouyePercent = args.Double("souyePercent") ?? 40,
-                    LineReserveM = args.Double("lineReserveM").Value,
-                }));
+                JournalChanges(args)));
 
             Register("select_marking_profile", (app, args) =>
             {
@@ -462,7 +456,16 @@ namespace PluginForRevit2022.Mcp
             }
 
             var timer = System.Diagnostics.Stopwatch.StartNew();
-            string arguments = PluginLog.Short(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(request.Parameters));
+            string arguments;
+            try
+            {
+                // Только для лога: большой или необычный набор аргументов не должен ронять команду
+                arguments = PluginLog.Short(new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(request.Parameters));
+            }
+            catch (Exception ex)
+            {
+                arguments = $"(аргументы не записаны в лог: {ex.Message})";
+            }
             try
             {
                 ViewSession.Ui = uiApp.ActiveUIDocument;
@@ -485,6 +488,25 @@ namespace PluginForRevit2022.Mcp
                     (ex is ArgumentException ? "" : " | " + PluginLog.Short(ex.ToString(), 1500)));
                 return McpResponse.Fail(request.RequestId, ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Запасы кабеля: меняются только переданные значения, остальные остаются из профиля.
+        /// Ни одного не передано — запасы не трогаются (null).
+        /// </summary>
+        private static JournalSettings JournalChanges(McpArgs args)
+        {
+            double? aps = args.Double("apsPercent"), security = args.Double("securityPercent"),
+                souye = args.Double("souyePercent"), line = args.Double("lineReserveM");
+            if (aps == null && security == null && souye == null && line == null) return null;
+            JournalSettings current = MarkingSettings.CurrentJournal();
+            return new JournalSettings
+            {
+                ApsPercent = aps ?? current.ApsPercent,
+                SecurityPercent = security ?? current.SecurityPercent,
+                SouyePercent = souye ?? current.SouyePercent,
+                LineReserveM = line ?? current.LineReserveM,
+            };
         }
 
         // ---------- Общие ----------

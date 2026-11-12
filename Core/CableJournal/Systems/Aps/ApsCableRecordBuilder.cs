@@ -68,6 +68,9 @@ namespace ARBM.CableJournalExporter.Services
             // Delegate graph construction (uses LoggedRouteLengthCalculator which supports a cancellation-aware API)
             _routeCalc.BuildGraphsByLevel(_doc, controllers, param, cancel);
 
+            // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
+            if (_routeCalc.BuildError != null) return result;
+
             cancel?.ClearCurrentOperation();
 
             foreach (var ctrl in controllers)
@@ -299,6 +302,8 @@ namespace ARBM.CableJournalExporter.Services
                     return directFeet * 0.3048;
                 }
 
+                // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
+                if (_routeCalc.LastRouteBridged) isFallbackForLength = true;
                 return feet * 0.3048;
             }
 

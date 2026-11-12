@@ -1,5 +1,6 @@
 using ARBM.CableJournalExporter.Systems.Souye.Models;
 using Autodesk.Revit.DB;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -90,6 +91,16 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             var devices = CollectDevices(doc, commentsValue);
 
             // ── Шаг 3: группировка и сортировка ──────────────────────────────────
+            // У прибора номер шлейфа один: шлейф с устройствами разных корпусов слился бы в одну цепь
+            // (и сечение считалось бы по мощности обоих) — это ошибка маркировки.
+            var mixed = devices.Where(d => d.LoopAddressParsed > 0).GroupBy(d => d.LoopAddressParsed)
+                .Select(g => (loop: g.Key, buildings: g.Select(d => d.HousingBlock?.Trim() ?? "").Distinct().ToList()))
+                .Where(x => x.buildings.Count > 1).ToList();
+            if (mixed.Count > 0)
+                return SouyeCollectResult.Failure(
+                    "У шлейфов устройства разных корпусов:\n" +
+                    string.Join("\n", mixed.Select(x => $"  шлейф {x.loop}: корпуса {string.Join(", ", x.buildings.Select(b => b.Length == 0 ? "(пусто)" : b))}")) +
+                    "\nНомер шлейфа прибора должен относиться к одному корпусу. Проверьте «ARBM_Корпус» и адрес устройств.");
             var loopGroups = BuildLoopGroups(devices);
 
             // ── Шаг 4: сборка итоговой модели ────────────────────────────────────
@@ -114,7 +125,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             var controllers = new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                 .WhereElementIsNotElementType()
-                .Where(e => GetCommentsValue(e) == commentsValue)
+                .Where(e => SameComments(GetCommentsValue(e), commentsValue))
                 .ToList();
 
             if (controllers.Count == 0)
@@ -147,7 +158,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             return new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_NurseCallDevices)
                 .WhereElementIsNotElementType()
-                .Where(e => GetCommentsValue(e) == commentsValue)
+                .Where(e => SameComments(GetCommentsValue(e), commentsValue))
                 .Select(e => _parser.ParseDevice(e))
                 .ToList();
         }
@@ -194,6 +205,9 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// <summary>
         /// Читает значение параметра <c>ALL_MODEL_INSTANCE_COMMENTS</c> у элемента.
         /// </summary>
+        private static bool SameComments(string a, string b) =>
+            string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+
         private static string GetCommentsValue(Element element)
         {
             return element

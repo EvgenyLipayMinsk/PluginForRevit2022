@@ -231,6 +231,12 @@ namespace ARBM.CableJournalExporter.Services
         /// </summary>
         public RouteLengthCalculator Inner => _inner;
 
+        /// <summary>Последний расчёт прошёл через «мост» между несвязанными частями трасс.</summary>
+        public bool LastRouteBridged => _inner.LastRouteBridged;
+
+        /// <summary>Ошибка построения графа (null — построен).</summary>
+        public string BuildError => _inner.BuildError;
+
         // Expose accessors if needed by callers (read-only).
         public Dictionary<long, RouteLengthCalculator.Graph> GraphsByLevel => _inner._graphsByLevel;
         public Dictionary<string, RouteLengthCalculator.Graph.Node> DeviceNodes => _inner._deviceNodes;

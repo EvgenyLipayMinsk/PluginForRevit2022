@@ -42,6 +42,9 @@ namespace ARBM.CableJournalExporter.Services
 
             // 🔥 Строим графы по уровням один раз
             _routeCalc.BuildGraphsByLevel(_doc, controllers, param);
+
+            // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
+            if (_routeCalc.BuildError != null) return result;
             // _graphsByLevel = _routeCalc._graphsByLevel;
             //  _levelsById = _routeCalc.LevelsById;
 
@@ -215,6 +218,7 @@ namespace ARBM.CableJournalExporter.Services
                 CableCategory = cableCategory,
                 Purpose = "Шлейф СОТС",
                 Length = Math.Ceiling(ComputeLengthSmart(d1, d2, null, out isFallbackForLength) * correctionFactor).ToString("F2"),
+                IsFallbackForLength = isFallbackForLength,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -312,6 +316,8 @@ namespace ARBM.CableJournalExporter.Services
                     return directFeet * 0.3048;
                 }
 
+                // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
+                if (_routeCalc.LastRouteBridged) isFallbackForLength = true;
                 // Возвращаем длину в метрах
                 return feet * 0.3048;
             }

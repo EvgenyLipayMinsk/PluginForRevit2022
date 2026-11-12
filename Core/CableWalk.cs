@@ -234,6 +234,9 @@ namespace PluginForRevit2022.Core
             return found == null ? -1 : RevitIds.IdOf(found.Id);
         }
 
+        /// <summary>Сбросить кэш уровней (уровни могли добавить или удалить между вызовами).</summary>
+        internal static void ResetLevels() => _levels = null;
+
         [ThreadStatic] private static List<Level> _levels;
         [ThreadStatic] private static Document _levelsDoc;
 

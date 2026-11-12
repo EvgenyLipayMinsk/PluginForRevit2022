@@ -238,6 +238,16 @@ namespace PluginForRevit2022.Core
             }
         }
 
+        /// <summary>Запасы кабеля текущего профиля (копия).</summary>
+        public static JournalSettings CurrentJournal()
+        {
+            JournalSettings j = ReadAccount().Journal ?? new JournalSettings();
+            return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM };
+        }
+
+        /// <summary>Запас на линию из профиля, м (добавляется к каждой строке журнала).</summary>
+        public static double LineReserveM() => Math.Max(0, ReadAccount().Journal.LineReserveM);
+
         /// <summary>Добавляет к длине каждой строки журнала запас на линию из профиля.</summary>
         public static void ApplyLineReserve(IEnumerable<CableRecord> records)
         {

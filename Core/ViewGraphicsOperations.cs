@@ -406,39 +406,43 @@ namespace PluginForRevit2022.Core
             }
 
             string target;
-            using (var transaction = new Transaction(doc, $"AerBIM: графика вида «{view.Name}»"))
+            // Вид открывается на время изменений (иначе Revit перерисовывает неоткрытый вид на каждую правку)
+            using (ViewSession.Open(doc, view))
             {
-                transaction.Start();
-                OverrideGraphicSettings settings;
-                if (byFilter)
+                using (var transaction = new Transaction(doc, $"AerBIM: графика вида «{view.Name}»"))
                 {
-                    ParameterFilterElement filter = ResolveFilter(doc, request.Filter);
-                    target = $"фильтр «{filter.Name}»";
-                    if (!view.IsFilterApplied(filter.Id))
+                    transaction.Start();
+                    OverrideGraphicSettings settings;
+                    if (byFilter)
                     {
-                        view.AddFilter(filter.Id);
-                        warnings.Add("фильтр добавлен на вид");
+                        ParameterFilterElement filter = ResolveFilter(doc, request.Filter);
+                        target = $"фильтр «{filter.Name}»";
+                        if (!view.IsFilterApplied(filter.Id))
+                        {
+                            view.AddFilter(filter.Id);
+                            warnings.Add("фильтр добавлен на вид");
+                        }
+                        settings = request.Reset ? new OverrideGraphicSettings() : view.GetFilterOverrides(filter.Id);
+                        settings = Apply(doc, settings, request.Overrides);
+                        view.SetFilterOverrides(filter.Id, settings);
+                        if (request.Visible != null) view.SetFilterVisibility(filter.Id, request.Visible.Value);
                     }
-                    settings = request.Reset ? new OverrideGraphicSettings() : view.GetFilterOverrides(filter.Id);
-                    settings = Apply(doc, settings, request.Overrides);
-                    view.SetFilterOverrides(filter.Id, settings);
-                    if (request.Visible != null) view.SetFilterVisibility(filter.Id, request.Visible.Value);
-                }
-                else
-                {
-                    ElementId categoryId = DimensionOperations.CategoryId(doc, request.Category)
-                        ?? throw new ArgumentException($"Категория «{request.Category}» не найдена.");
-                    target = $"категория «{Category.GetCategory(doc, categoryId)?.Name}»";
-                    settings = request.Reset ? new OverrideGraphicSettings() : view.GetCategoryOverrides(categoryId);
-                    settings = Apply(doc, settings, request.Overrides);
-                    view.SetCategoryOverrides(categoryId, settings);
-                    if (request.Visible != null)
+                    else
                     {
-                        if (view.CanCategoryBeHidden(categoryId)) view.SetCategoryHidden(categoryId, !request.Visible.Value);
-                        else warnings.Add("видимость этой категории на виде изменить нельзя");
+                        ElementId categoryId = DimensionOperations.CategoryId(doc, request.Category)
+                            ?? throw new ArgumentException($"Категория «{request.Category}» не найдена.");
+                        target = $"категория «{Category.GetCategory(doc, categoryId)?.Name}»";
+                        settings = request.Reset ? new OverrideGraphicSettings() : view.GetCategoryOverrides(categoryId);
+                        settings = Apply(doc, settings, request.Overrides);
+                        view.SetCategoryOverrides(categoryId, settings);
+                        if (request.Visible != null)
+                        {
+                            if (view.CanCategoryBeHidden(categoryId)) view.SetCategoryHidden(categoryId, !request.Visible.Value);
+                            else warnings.Add("видимость этой категории на виде изменить нельзя");
+                        }
                     }
+                    Commit(transaction, request.DryRun);
                 }
-                Commit(transaction, request.DryRun);
             }
 
             return new Dictionary<string, object>
@@ -461,11 +465,15 @@ namespace PluginForRevit2022.Core
             {
                 throw new InvalidOperationException($"Фильтр «{filter.Name}» не применён к «{view.Name}».");
             }
-            using (var transaction = new Transaction(doc, $"AerBIM: убрать фильтр «{filter.Name}»"))
+            // Вид открывается на время изменений (иначе Revit перерисовывает неоткрытый вид на каждую правку)
+            using (ViewSession.Open(doc, view))
             {
-                transaction.Start();
-                view.RemoveFilter(filter.Id);
-                Commit(transaction, dryRun);
+                using (var transaction = new Transaction(doc, $"AerBIM: убрать фильтр «{filter.Name}»"))
+                {
+                    transaction.Start();
+                    view.RemoveFilter(filter.Id);
+                    Commit(transaction, dryRun);
+                }
             }
             return new Dictionary<string, object>
             {

@@ -116,6 +116,7 @@ namespace PluginForRevit2022.Core
                         string error = RevitText.TrySet(device, pair.Key, pair.Value);
                         if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, {pair.Key}: {error}");
                     }
+                    ClearForeign(device, system, failures);
                     // Пустое значение не затирает существующие «Комментарии» устройств.
                     if (!string.IsNullOrWhiteSpace(request.Comments))
                     {
@@ -259,10 +260,11 @@ namespace PluginForRevit2022.Core
                 }
             }
             string currentFloor = controller.LookupParameter(floorParam)?.AsString()?.Trim();
-            string floor = int.TryParse(currentFloor, out int parsed) ? parsed.ToString() : FloorOf(doc, controller, null);
+            // Как у устройств: цифра из имени уровня, для уровня без номера — этаж из окна (r.Floor).
+            string floor = int.TryParse(currentFloor, out int parsed) ? parsed.ToString() : FloorOf(doc, controller, r.Floor);
             if (floor == null)
             {
-                failures.Add($"прибор id {id}: не удалось определить этаж числом из уровня, заполните «{floorParam}» вручную");
+                failures.Add($"прибор id {id}: у уровня прибора нет номера этажа в имени — укажите этаж для уровней без номера или заполните «{floorParam}» прибора");
             }
             else
             {
@@ -329,7 +331,27 @@ namespace PluginForRevit2022.Core
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
                 .Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) && (system == "aps"
                     ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim()
-                    : Value(e, ParamAddress) == address));
+                    : Value(e, ParamAddress) == address && (system != "souye" || Value(e, ParamBuilding) == r.Building?.Trim())));
+        }
+
+        /// <summary>
+        /// Параметры другой системы, оставшиеся от прошлой маркировки, очищаются: иначе устройство, перемаркированное
+        /// из АПС в СОТС, по «ARBM_Номер прибора»/«ARBM_Номер линии» осталось бы и в линии и журнале АПС.
+        /// АПС не использует адрес; СОУЭ — номер прибора и линии; СОТС — ещё и корпус.
+        /// Очищается только заполненный и доступный для записи параметр.
+        /// </summary>
+        internal static void ClearForeign(Element device, string system, List<string> failures)
+        {
+            string[] foreign = system == "aps" ? new[] { ParamAddress }
+                : system == "souye" ? new[] { ParamController, ParamLine }
+                : new[] { ParamController, ParamLine, ParamBuilding };
+            foreach (string name in foreign)
+            {
+                Parameter parameter = device.LookupParameter(name);
+                if (parameter == null || parameter.IsReadOnly || string.IsNullOrEmpty(parameter.AsString())) continue;
+                string error = RevitText.TrySet(parameter, name, "");
+                if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, {name}: {error}");
+            }
         }
 
         private static Dictionary<string, string> ValuesFor(string system, MarkDevicesRequest r, string mark, string bco)
@@ -405,12 +427,23 @@ namespace PluginForRevit2022.Core
                 .Where(c => c.Symbol.FamilyName != "ARBM_Межэтажный переход" && c.Location is LocationCurve)
                 .ToList();
             List<FamilyInstance> ofLine = lineCables.Where(c => lineCable(c)).ToList();
+            bool byGrouping = ofLine.Count > 0;
             if (ofLine.Count == 0 && !string.IsNullOrWhiteSpace(request.Comments))
             {
                 ofLine = lineCables.Where(c => string.Equals(c.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim(),
                     request.Comments.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
             }
-            if (ofLine.Count > 0)
+            // Этаж трасс заполняется вручную. Без него уровень пришлось бы угадывать (по высоте или основе),
+            // и порядок по кабелю разошёлся бы с журналом — обход не запускается, порядок по графу журнала.
+            // По «Комментариям» берутся трассы всей системы — чужая трасса без этажа не должна отключать обход
+            List<FamilyInstance> noFloor = !byGrouping ? new List<FamilyInstance>() : ofLine.Where(c => !int.TryParse(c.LookupParameter("ADSK_Этаж")?.AsString()?.Trim(), out _)).ToList();
+            if (noFloor.Count > 0)
+            {
+                warnings.Add($"у трасс линии не заполнен «ADSK_Этаж» цифрой: {noFloor.Count} из {ofLine.Count} " +
+                    $"(id {string.Join(", ", noFloor.Take(10).Select(c => RevitIds.IdOf(c.Id)))}{(noFloor.Count > 10 ? ", …" : "")}) — " +
+                    "журнал положит их на этаж основы; заполните этаж устройств, которые на них висят. Порядок по ходу кабеля не строился: порядок по минимуму кабеля");
+            }
+            if (ofLine.Count > 0 && noFloor.Count == 0)
             {
                 List<FamilyInstance> walked = CableWalk.Order(doc, ofLine, controller, devices, out List<FamilyInstance> notReached, out string problem);
                 if (walked != null && walked.Count >= devices.Count * 0.9)
@@ -488,9 +521,11 @@ namespace PluginForRevit2022.Core
             string value = element.LookupParameter(ParamGrouping)?.AsString();
             if (string.IsNullOrWhiteSpace(value)) return false;
             string[] parts = value.Split('.');
-            return parts.Length >= 3 &&
-                   parts[parts.Length - 2].Trim() == controller.Trim() &&
-                   parts[parts.Length - 1].Trim() == line.Trim();
+            if (parts.Length < 3) return false;
+            // Числом, как JournalLevelCheck.LineOf и LineAssignmentOperations.LineOf: «СПС_АЛС.01.2» — прибор 1, линия 2.
+            bool Same(string a, string b) =>
+                int.TryParse(a.Trim(), out int x) && int.TryParse(b.Trim(), out int y) ? x == y : a.Trim() == b.Trim();
+            return Same(parts[parts.Length - 2], controller) && Same(parts[parts.Length - 1], line);
         }
 
         /// <summary>

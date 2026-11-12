@@ -160,6 +160,19 @@ namespace PluginForRevit2022.Core
 
         private static long LevelOf(FamilyInstance element)
         {
+            // Как журнал: ADSK_Этаж цифрой → уровень с этим номером в имени (кабель под перекрытием Этажа 04
+            // с ADSK_Этаж = 3 — это Этаж 03); иначе «Уровень» и основа.
+            if (int.TryParse(element.LookupParameter("ADSK_Этаж")?.AsString()?.Trim(), out int floor))
+            {
+                Level byNumber = new FilteredElementCollector(element.Document).OfClass(typeof(Level)).Cast<Level>()
+                    .FirstOrDefault(l => { var m = System.Text.RegularExpressions.Regex.Match(l.Name ?? "", @"-?\d+"); return m.Success && int.Parse(m.Value) == floor; });
+                if (byNumber != null) return RevitIds.IdOf(byNumber.Id);
+                XYZ point = element.Location is LocationPoint lp ? lp.Point
+                    : element.Location is LocationCurve lc ? (lc.Curve.GetEndPoint(0) + lc.Curve.GetEndPoint(1)) / 2 : null;
+                Level byHeight = point == null ? null : new FilteredElementCollector(element.Document).OfClass(typeof(Level)).Cast<Level>()
+                    .Where(l => l.ProjectElevation <= point.Z + 50 / 304.8).OrderByDescending(l => l.ProjectElevation).FirstOrDefault();
+                if (byHeight != null) return RevitIds.IdOf(byHeight.Id);
+            }
             if (element.LevelId != ElementId.InvalidElementId) return RevitIds.IdOf(element.LevelId);
             Element host = element.Host;
             if (host is Level level) return RevitIds.IdOf(level.Id);

@@ -22,6 +22,7 @@ namespace PluginForRevit2022.Core
         {
             string pattern = string.IsNullOrWhiteSpace(groupContains) ? "ЗК" : groupContains.Trim();
             double cell = (cellMm <= 0 ? 150 : cellMm) / 304.8;
+            CableWalk.ResetLevels();
             List<Group> groups = new FilteredElementCollector(doc).OfClass(typeof(Group)).Cast<Group>()
                 .Where(g => g.OwnerViewId != ElementId.InvalidElementId &&
                             (g.GroupType?.Name ?? g.Name).IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0 &&
@@ -56,11 +57,19 @@ namespace PluginForRevit2022.Core
             var report = new List<Dictionary<string, object>>();
             var warnings = new List<string>();
             var assigned = new HashSet<long>();
+            var inOpenZone = new HashSet<long>();          // в незамкнутой зоне: зона неизвестна, значение не трогаем
+            var processedLevels = new HashSet<long>();     // уровни, где есть разобранная группа зон
 
             foreach (Group group in groups)
             {
                 View view = doc.GetElement(group.OwnerViewId) as View;
                 ElementId levelId = (view as ViewPlan)?.GenLevel?.Id ?? ElementId.InvalidElementId;
+                if (levelId == ElementId.InvalidElementId)
+                {
+                    // Без уровня вида зоны по X/Y раздались бы устройствам всех этажей.
+                    warnings.Add($"группа «{group.Name}» на виде «{view?.Name}» без уровня (не план этажа) — пропущена");
+                    continue;
+                }
                 var segments = new List<(XYZ a, XYZ b)>();
                 var labels = new List<(string text, XYZ point)>();
                 CollectMembers(doc, group, segments, labels);
@@ -93,6 +102,7 @@ namespace PluginForRevit2022.Core
 
                 // Заливка от каждой подписи
                 var owner = new int[w, h];
+                var openCell = new bool[w, h]; // клетки незамкнутых зон: их устройства сохраняют прежнюю ЗКПС
                 var zoneInfo = new List<Dictionary<string, object>>();
                 for (int z = 0; z < zones.Count; z++)
                 {
@@ -122,7 +132,7 @@ namespace PluginForRevit2022.Core
                     }
                     if (leaked)
                     {
-                        foreach (var (x, y) in claimed) owner[x, y] = 0; // вне плана — освободить для соседних подписей
+                        foreach (var (x, y) in claimed) { owner[x, y] = 0; openCell[x, y] = true; } // вне плана — освободить для соседних подписей
                     }
                     zoneInfo.Add(new Dictionary<string, object>
                     {
@@ -131,17 +141,20 @@ namespace PluginForRevit2022.Core
                         ["areaM2"] = Math.Round(filled * cell * cell * 0.092903, 1),
                         ["open"] = leaked || seed == null,
                     });
+                    if (seed == null) warnings.Add($"зона «{zones[z].text}» ({group.Name}): в её области уже есть другая подпись или подпись вне области — зона не используется");
                     if (leaked) warnings.Add($"зона «{zones[z].text}» ({group.Name}): граница не замкнута — область вытекла за пределы плана, зона не используется");
                 }
 
                 // Устройства уровня
+                processedLevels.Add(RevitIds.IdOf(levelId));
                 var counts = new int[zones.Count];
-                foreach (FamilyInstance device in devices.Where(d => levelId == ElementId.InvalidElementId || d.LevelId == levelId))
+                foreach (FamilyInstance device in devices.Where(d => LevelOf(d) == levelId))
                 {
                     var (cx, cy) = Cell(((LocationPoint)device.Location).Point);
                     int z = ZoneAt(owner, cx, cy, w, h);
-                    if (z <= 0 || (bool)zoneInfo[z - 1]["open"]) continue;
                     long id = RevitIds.IdOf(device.Id);
+                    if ((z > 0 && (bool)zoneInfo[z - 1]["open"]) || (z <= 0 && cx >= 0 && cy >= 0 && cx < w && cy < h && openCell[cx, cy])) inOpenZone.Add(id);
+                    if (z <= 0 || (bool)zoneInfo[z - 1]["open"]) continue;
                     if (!assigned.Add(id)) continue;
                     changes.Add((device, (string)zoneInfo[z - 1]["value"], zones[z - 1].text));
                     counts[z - 1]++;
@@ -156,9 +169,16 @@ namespace PluginForRevit2022.Core
                 });
             }
 
-            int changed = 0;
+            // Вне всех зон на уровнях с зонами: прежняя ЗКПС устарела (зоны перерисовали) — очищается.
+            // Устройства в незамкнутых зонах и на уровнях без групп зон не трогаются.
+            List<FamilyInstance> outsideDevices = devices.Where(d =>
+                !assigned.Contains(RevitIds.IdOf(d.Id)) && !inOpenZone.Contains(RevitIds.IdOf(d.Id)) &&
+                processedLevels.Contains(RevitIds.IdOf(LevelOf(d)))).ToList();
+            List<FamilyInstance> toClear = outsideDevices.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).ToList();
+
+            int changed = 0, cleared = 0;
             var failures = new List<string>();
-            if (!dryRun && changes.Count > 0)
+            if (!dryRun && (changes.Count > 0 || toClear.Count > 0))
             {
                 using (var transaction = new Transaction(doc, "AerBIM: ЗКПС устройств"))
                 {
@@ -170,12 +190,18 @@ namespace PluginForRevit2022.Core
                         if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}: {error}");
                         else changed++;
                     }
+                    foreach (FamilyInstance device in toClear)
+                    {
+                        string error = RevitText.TrySet(device, Param, "");
+                        if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}: {error}");
+                        else cleared++;
+                    }
                     if (failures.Count > 0) transaction.RollBack();
                     else transaction.Commit();
                 }
             }
 
-            int outside = devices.Count(d => !assigned.Contains(RevitIds.IdOf(d.Id)) && groups.Any(g => (doc.GetElement(g.OwnerViewId) as ViewPlan)?.GenLevel?.Id == d.LevelId));
+            int outside = outsideDevices.Count;
             return new Dictionary<string, object>
             {
                 ["dryRun"] = dryRun,
@@ -183,11 +209,14 @@ namespace PluginForRevit2022.Core
                 ["devicesInZones"] = changes.Count,
                 ["devicesOutsideZonesOnTheseLevels"] = outside,
                 ["changed"] = changed,
+                ["outsideZonesToClear"] = toClear.Count,
+                ["cleared"] = cleared,
+                ["inOpenZonesKept"] = inOpenZone.Count,
                 ["failures"] = failures.Take(50).ToList(),
                 ["warnings"] = warnings,
                 ["summary"] = dryRun
-                    ? $"Предпросмотр: устройств в зонах ЗКПС: {changes.Count}, вне зон на этих уровнях: {outside}. Для записи повторите с dryRun=false."
-                    : failures.Count > 0 ? $"ЗКПС не записаны: ошибок {failures.Count}." : $"Записано ARBM_ЗКПС: {changed}. Отменить можно через Ctrl+Z.",
+                    ? $"Предпросмотр: устройств в зонах ЗКПС: {changes.Count}, вне зон на этих уровнях: {outside} (у {toClear.Count} прежняя ЗКПС будет очищена), в незамкнутых зонах (не меняются): {inOpenZone.Count}. Для записи повторите с dryRun=false."
+                    : failures.Count > 0 ? $"ЗКПС не записаны: ошибок {failures.Count}." : $"Записано ARBM_ЗКПС: {changed}, очищено вне зон: {cleared}. Отменить можно через Ctrl+Z.",
             };
         }
 
@@ -254,6 +283,18 @@ namespace PluginForRevit2022.Core
                         if (x >= 0 && y >= 0 && x < w && y < h && owner[x, y] > 0) return owner[x, y];
                     }
             return 0;
+        }
+
+        /// <summary>
+        /// Уровень устройства: «Уровень»; у семейств на грани он бывает пуст — уровень основы, иначе по высоте точки.
+        /// </summary>
+        private static ElementId LevelOf(FamilyInstance device)
+        {
+            if (device.LevelId != ElementId.InvalidElementId) return device.LevelId;
+            if (device.Host is Level hostLevel) return hostLevel.Id;
+            if (device.Host != null && device.Host.LevelId != ElementId.InvalidElementId) return device.Host.LevelId;
+            XYZ p = (device.Location as LocationPoint)?.Point;
+            return p == null ? ElementId.InvalidElementId : CableWalk.LevelByZ(device.Document, p)?.Id ?? ElementId.InvalidElementId;
         }
     }
 }

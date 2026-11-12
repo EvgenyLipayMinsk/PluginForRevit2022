@@ -129,7 +129,19 @@ namespace PluginForRevit2022.Mcp
                 return;
             }
 
-            byte[] bytes = Encoding.UTF8.GetBytes(McpJson.Serialize(response));
+            // Ответ, который нельзя сериализовать (тип, словарь с нестроковыми ключами, размер), уходит ошибкой —
+            // иначе MCP-сервер ждал бы до таймаута.
+            byte[] bytes;
+            try
+            {
+                bytes = Encoding.UTF8.GetBytes(McpJson.Serialize(response));
+            }
+            catch (Exception ex)
+            {
+                McpLog.Error($"Ответ {response.RequestId} не сериализуется", ex);
+                bytes = Encoding.UTF8.GetBytes(McpJson.Serialize(McpResponse.Fail(response.RequestId,
+                    $"Команда выполнена, но ответ не удалось передать: {ex.Message}")));
+            }
             await _sendLock.WaitAsync().ConfigureAwait(false);
             try
             {

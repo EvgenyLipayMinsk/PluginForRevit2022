@@ -213,10 +213,12 @@ namespace PluginForRevit2022.Core
                     foreach (Element element in toTag)
                     {
                         string category = element.Category.Name;
-                        if (failures.ContainsKey(category))
+                        // Три сбоя и ни одной марки в категории — скорее всего нет семейства марки: остальные не пробуем.
+                        // Одиночный сбой (элемент в группе и т.п.) не оставляет без марок всю категорию.
+                        if (failures.ContainsKey(category) && failedCount[category] >= 3 && !created.ContainsKey(category))
                         {
                             failedCount[category]++;
-                            continue; // для категории уже нет семейства марки: не пробуем каждый элемент
+                            continue;
                         }
                         try
                         {
@@ -228,7 +230,7 @@ namespace PluginForRevit2022.Core
                         catch (Exception ex)
                         {
                             failures[category] = ex.Message;
-                            failedCount[category] = 1;
+                            failedCount[category] = (failedCount.TryGetValue(category, out int failed) ? failed : 0) + 1;
                         }
                     }
                     OpsCommon.Finish(transaction, created.Count == 0);

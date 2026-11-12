@@ -80,7 +80,9 @@ namespace PluginForRevit2022.Core
         {
             string controller = Read(device, Controller), line = Read(device, LineNumber), address = Read(device, Address);
             if (!string.IsNullOrEmpty(controller) && !string.IsNullOrEmpty(line)) return $"aps|{Read(device, Building)}|{controller}|{line}";
-            return string.IsNullOrEmpty(address) ? null : $"addr|{address}";
+            // СОУЭ: адрес — только номер шлейфа, поэтому в ключе корпус (шлейф 1 корпусов M1 и M2 — разные линии).
+            // СОТС: адрес «прибор.шлейф», корпус обычно пуст.
+            return string.IsNullOrEmpty(address) ? null : $"addr|{Read(device, Building)}|{address}";
         }
 
         public static HashSet<long> MemberIds(Document doc, string key) =>
@@ -118,7 +120,7 @@ namespace PluginForRevit2022.Core
             }
 
             var warnings = new List<string>();
-            if (KeyOf(device) != null) warnings.Add("устройство было на другой линии и будет перенесено; номера той линии не изменятся");
+            if (KeyOf(device) != null) warnings.Add("устройство было на другой линии и будет перенесено; номера той линии не изменятся — в ней останется пропуск");
             List<LineMember> shifted = members.Where(m => m.Number >= number).ToList();
             int occupied = members.Count + 1;
             if (occupied > DeviceMarkingOperations.LineCapacity) warnings.Add($"на линии {occupied} адресов при ёмкости {DeviceMarkingOperations.LineCapacity}");
@@ -131,9 +133,14 @@ namespace PluginForRevit2022.Core
 
                 foreach (string name in new[] { Building, Controller, LineNumber, Address })
                 {
-                    string value = Read(anchor, name);
-                    if (!string.IsNullOrEmpty(value)) Set(device, name, value, failures);
+                    // Как у линии, в том числе пустое: иначе оставшийся корпус переносимого устройства дал бы другой ключ линии
+                    string value = Read(anchor, name) ?? "";
+                    Parameter own = device.LookupParameter(name);
+                    if (own == null || own.IsReadOnly || (own.AsString() ?? "").Trim() == value) continue;
+                    Set(device, name, value, failures);
                 }
+                // Перенос из линии другой системы: её параметры очищаются, иначе устройство осталось бы на старой линии.
+                DeviceMarkingOperations.ClearForeign(device, system, failures);
                 Set(device, Bco, settings.BcoOf(device.Symbol.FamilyName) ?? Read(anchor, Bco) ?? "", failures);
                 Set(device, Mark, number.ToString(), failures);
                 foreach (string name in new[] { "ADSK_Этаж", "О_Этаж" })
@@ -169,7 +176,7 @@ namespace PluginForRevit2022.Core
 
         // ===================== Удаление =====================
 
-        /// <summary>Снимает устройства с линии и закрывает пропуски. Очищается всё, кроме этажа.</summary>
+        /// <summary>Снимает устройства с линии и закрывает пропуски. Очищаются маркировка и «Комментарии»; этаж и ЗКПС остаются.</summary>
         public static Dictionary<string, object> Remove(Document doc, string lineKey, List<long> ids, bool dryRun)
         {
             if (ids == null || ids.Count == 0) throw new ArgumentException("Укажите устройства.");
@@ -205,7 +212,9 @@ namespace PluginForRevit2022.Core
                 }
                 foreach (FamilyInstance device in devices)
                 {
-                    foreach (string name in new[] { Building, Controller, Bco, LineNumber, Address, Mark, "ARBM_ЗКПС" })
+                    // ЗКПС — зона на плане, а не данные линии: остаётся (её переписывает assign_zkps).
+                    // «Комментарии» снимаются: с ними журнал счёл бы устройство неразмеченным устройством системы.
+                    foreach (string name in new[] { Building, Controller, Bco, LineNumber, Address, Mark })
                     {
                         if (!string.IsNullOrEmpty(Read(device, name))) Set(device, name, "", failures);
                     }

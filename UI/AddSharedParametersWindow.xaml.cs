@@ -163,7 +163,8 @@ namespace PluginForRevit2022.UI
                 Parameters = _parameters.Where(p => p.IsChecked).Select(p => p.Key).ToList(),
                 Categories = _categories.Where(c => c.IsChecked).Select(c => c.Key).ToList(),
                 IsInstance = InstanceRadio.IsChecked == true,
-                ParameterGroup = (GroupCombo.SelectedItem as ParameterGroupInfo)?.Id,
+                // Key, а не Id: у «Прочее» в 2022+ Id пустой, и пустое значение заменилось бы группой по умолчанию («Данные»)
+                ParameterGroup = (GroupCombo.SelectedItem as ParameterGroupInfo)?.Key,
                 AllowKindChange = AllowKindChangeBox.IsChecked == true,
                 DryRun = dryRun,
             };

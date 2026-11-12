@@ -1479,7 +1479,7 @@
     {
       "name": "mark_devices",
       "title": "Mark devices for the cable journal",
-      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) and needs routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection.",
+      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. Cable routes are not changed: their floor (ADSK_Этаж, digits) is filled manually. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) using only cable routes of this line: ADSK_Группирование like СПС_АЛС.<controller>.<line> (e.g. СПС_АЛС.1.2 = controller 1, line 2); if no such routes exist, falls back to routes with the same Comments value. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1523,11 +1523,11 @@
           },
           "comments": {
             "type": "string",
-            "description": "Comments value used by the journal to select elements. Empty = existing Comments are kept. Required for order=route."
+            "description": "Comments value used by the journal to select elements. Empty = existing Comments are kept. For order=route it is the fallback route filter when no routes have ADSK_Группирование of this line."
           },
           "floor": {
             "type": "string",
-            "description": "Floor as a number. Empty = digits from the element's level name."
+            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. SOUYE: ARBM_ПСБ_Адрес устройства is written as the loop number only (integer), security as controller.loop."
           },
           "parameterStandard": {
             "type": "string",
@@ -1554,7 +1554,7 @@
           },
           "controllerElementId": {
             "type": "integer",
-            "description": "Controller element id; required for order=route."
+            "description": "Controller element id (Electrical Equipment). Required for order=route; recommended always: the tool also writes into the controller what the journal needs (Comments, floor, ARBM_Корпус if empty, ARBM_ПС_Имя изделия: APS building.BCO.number, security ARK.floor.number, SOUYE BCO.number if empty). The controller's number and code come from its own ARBM_SP_ElementMark and ARBM_ПСБ_БЦО (e.g. ARK and 3 → M2.ARK.3); a warning is returned when that number differs from 'controller'. Changes are listed in result.controller.changes."
           },
           "dryRun": {
             "type": "boolean",
@@ -1863,6 +1863,72 @@
       },
       "annotations": {
         "readOnlyHint": true
+      }
+    },
+    {
+      "name": "assign_devices_to_lines",
+      "timeoutSeconds": 300,
+      "title": "Assign APS devices to lines by routes",
+      "description": "Read-only. Splits APS devices (Data Devices and Fire Alarm Devices of families ticked for АПС in the marking settings) into lines by cable routes: a route's line comes from ADSK_Группирование like СПС_АЛС.<controller>.<line>; a device belongs to the line whose route on the same level passes nearest, within maxDistanceMm (plan distance). For each line returns the ARK controller (ARK controllers are found by ARBM_ПСБ_БЦО containing ARK and the number in ARBM_SP_ElementMark), route count, device ids, families and the devices' current marking; also unassigned devices and devices near several lines. Use the result to call mark_devices per line with order=route, controllerElementId and the line's deviceIds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxDistanceMm": {
+            "type": "number",
+            "default": 500,
+            "description": "Max plan distance from a device to its line's route, mm."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "check_journal_levels",
+      "title": "Check levels for the cable journal",
+      "timeoutSeconds": 300,
+      "description": "Read-only. Per line (cable routes by ADSK_Группирование …АЛС.<controller>.<line>, devices by ARBM_Номер прибора/ARBM_Номер линии) checks levels the way the APS cable journal determines them: cable routes without a level (journal puts them into a common '-1' graph), routes whose journal level differs from the level at their height, devices whose journal level differs from the level of the route they sit on (journal cannot find a path and silently bridges), devices not near any route of their line, and empty ADSK_Этаж on routes and devices. Returns element ids per line.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attachMm": {
+            "type": "number",
+            "default": 600,
+            "description": "Max plan distance from a device to its line's route, mm."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "assign_zkps",
+      "title": "Fill ARBM_ЗКПС from zones on plans",
+      "timeoutSeconds": 300,
+      "description": "Fills ARBM_ЗКПС of APS devices (families ticked for АПС in the marking settings) from fire alarm control zones drawn on plans as detail groups whose name contains 'ЗК' (e.g. 'ЗКСПС_3_этаж'): the group's lines are zone boundaries, its text notes like 'ЗКСПС_3.21' are zone labels. Boundaries are rasterized (cellMm), each label's area is flood-filled; devices on the group view's level inside a zone get the label's number as written (ЗКСПС_3.21 → 3.21). Zones whose boundary is not closed are reported and skipped. The APS journal shows it as M2.8.BTH.1.27(3.21). dryRun defaults to true: get the user's confirmation before dryRun=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "groupContains": {
+            "type": "string",
+            "description": "Part of the detail group name, default 'ЗК'."
+          },
+          "cellMm": {
+            "type": "number",
+            "default": 150,
+            "description": "Grid cell, mm; gaps in boundaries up to ~1.5 cells are closed."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          },
+          "commentsContains": {
+            "type": "string",
+            "description": "Only devices whose Comments contain this text (e.g. 'АПС'), any category except Electrical Equipment and cable routes (Mechanical Equipment). Empty = families ticked for АПС in the marking settings."
+          }
+        }
       }
     },
     {
@@ -3022,7 +3088,7 @@
     {
       "name": "tag_equipment",
       "title": "Tag equipment",
-      "description": "Tags equipment in a view that has no tag yet. Default categories: the plugin's devices (fire alarm, data, nurse call, communication, security, electrical equipment and fixtures, lighting devices, telephone). Uses the category's default tag type unless tagType is given; categories without a loaded tag family are reported. dryRun defaults to true.",
+      "description": "Tags equipment in a view that has no tag yet. Default categories: the plugin's devices (fire alarm, data, nurse call, communication, security, electrical equipment and fixtures, lighting devices, telephone). Uses the category's default tag type unless tagType is given; categories without a loaded tag family are reported. dryRun defaults to true: the preview only counts untagged elements per category and checks that a tag family is loaded (fast, nothing is created); the write creates all tags in one transaction and hides Revit warnings.",
       "inputSchema": {
         "type": "object",
         "properties": {

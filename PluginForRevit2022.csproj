@@ -128,6 +128,7 @@
     <Compile Include="CmdMcp.cs" />
     <Compile Include="CmdMarkDevices.cs" />
     <Compile Include="CmdGuarded.cs" />
+    <Compile Include="CmdInstructions.cs" />
     <Compile Include="CmdSaveLog.cs" />
     <Compile Include="CmdDeviceLine.cs" />
     <Compile Include="CmdMarkingSettings.cs" />
@@ -149,7 +150,10 @@
     <Compile Include="Core\SheetOperations.cs" />
     <Compile Include="Core\ViewOperations.cs" />
     <Compile Include="Core\DeviceMarkingOperations.cs" />
+    <Compile Include="Core\LineAssignmentOperations.cs" />
     <Compile Include="Core\PluginLog.cs" />
+    <Compile Include="Core\ViewSession.cs" />
+    <Compile Include="Core\ZkpsOperations.cs" />
     <Compile Include="Core\ClashOperations.cs" />
     <Compile Include="Core\RoomAnalysisOperations.cs" />
     <Compile Include="Core\BuildingElementOperations.cs" />
@@ -172,6 +176,8 @@
     <Compile Include="Core\DetectorPlacementOperations.cs" />
     <Compile Include="Core\PluginParameterCheck.cs" />
     <Compile Include="Core\CableJournalOperations.cs" />
+    <Compile Include="Core\CableWalk.cs" />
+    <Compile Include="Core\JournalLevelCheck.cs" />
     <Compile Include="Core\CableJournal\JournalDialog.cs" />
     <Compile Include="Core\CableJournal\Services\ExcelExporter.cs" />
     <Compile Include="Core\CableJournal\Services\TemplateValidator.cs" />

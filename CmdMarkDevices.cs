@@ -43,7 +43,8 @@ namespace PluginForRevit2022
                 if (request.Order == "route")
                 {
                     SessionWindows.Inform("mark-route-hint", "Маркировка",
-                        $"Перед маркировкой: в семействах кабеля (трассах) задайте в параметре «Комментарии» значение «{request.Comments}».\n\n" +
+                        $"Маршрут строится по трассам этой линии: у семейств кабеля в «ADSK_Группирование» должно стоять …АЛС.{request.Controller}.{request.Line} " +
+                        "(например СПС_АЛС.1.2 — прибор 1, линия 2). Если таких трасс нет, берутся трассы с тем же значением «Комментарии», что в окне.\n\n" +
                         "Шаг 1: кликните прибор (категория «Электрооборудование»), от которого идёт линия.\n\n" +
                         "Шаг 2: выделите устройства линии и нажмите «Готово» на панели параметров вверху окна Revit.\n\n" +
                         "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
@@ -55,8 +56,12 @@ namespace PluginForRevit2022
                 else
                 {
                     SessionWindows.Inform("mark-manual-hint", "Маркировка",
-                        "Кликайте устройства по порядку номеров. Чтобы закончить выбор, нажмите Esc.\n\n" +
+                        "Шаг 1: кликните прибор (категория «Электрооборудование»), к которому подключена линия. " +
+                        "В него запишутся данные для кабельного журнала.\n\n" +
+                        "Шаг 2: кликайте устройства по порядку номеров. Чтобы закончить выбор, нажмите Esc.\n\n" +
                         "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
+                    Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, к которому подключена линия");
+                    request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
                     request.Ids = PickInOrder(uiDoc, DeviceFilter(request.System));
                 }
             }
@@ -80,6 +85,14 @@ namespace PluginForRevit2022
                 }
                 var devices = (List<Dictionary<string, object>>)preview["devices"];
                 string info = $"Система: {window.SystemTitle}\nПрибор: {request.Controller}, линия: {request.Line}\nНомера: {devices.First()["number"]}–{devices.Last()["number"]}\nЗанято адресов на линии: {preview["lineAddresses"]} из {preview["lineCapacity"]}";
+                if (preview["controller"] is Dictionary<string, object> controllerInfo)
+                {
+                    var controllerChanges = (List<Dictionary<string, object>>)controllerInfo["changes"];
+                    info += controllerChanges.Count == 0
+                        ? "\n\nПрибор: данные для журнала уже заполнены"
+                        : "\n\nВ прибор будет записано:\n" + string.Join("\n", controllerChanges.Select(c =>
+                            $"  {c["parameter"]}: {(string.IsNullOrEmpty((string)c["old"]) ? "(пусто)" : c["old"])} → {c["new"]}"));
+                }
                 var warnings = (List<string>)preview["warnings"];
                 if (warnings.Count > 0) info += "\n\nВнимание:\n" + string.Join("\n", warnings.Take(5));
                 if (!SessionWindows.Confirm("mark-devices-confirm", "Маркировка", $"Разметить устройств: {devices.Count}?\n\n{info}"))
@@ -97,23 +110,88 @@ namespace PluginForRevit2022
             }
         }
 
-        /// <summary>Клики по одному задают номера; Esc завершает выбор.</summary>
+        /// <summary>
+        /// Клики по одному задают номера; Esc завершает выбор. Уже выбранные устройства
+        /// временно закрашиваются зелёным на текущем виде; после выбора окраска откатывается
+        /// (в проекте не остаётся), а устройства остаются выделенными.
+        /// </summary>
         private static List<long> PickInOrder(UIDocument uiDoc, ISelectionFilter filter)
         {
+            Document doc = uiDoc.Document;
+            View view = uiDoc.ActiveView;
             var ids = new List<long>();
-            try
+            var picked = new List<ElementId>();
+            OverrideGraphicSettings paint = PickedOverride(doc);
+            bool canPaint = paint != null;
+            string note = "";
+
+            using (var group = new TransactionGroup(doc, "AerBIM: подсветка выбранных устройств"))
             {
-                while (true)
+                group.Start();
+                try
                 {
-                    Reference picked = uiDoc.Selection.PickObject(ObjectType.Element, filter, $"Устройство №{ids.Count + 1}. Esc — завершить");
-                    long id = RevitIds.IdOf(picked.ElementId);
-                    if (!ids.Contains(id)) ids.Add(id);
+                    while (true)
+                    {
+                        Reference reference = uiDoc.Selection.PickObject(ObjectType.Element, filter,
+                            $"Устройство №{ids.Count + 1}. Выбрано: {ids.Count}.{note} Esc — завершить");
+                        long id = RevitIds.IdOf(reference.ElementId);
+                        if (ids.Contains(id))
+                        {
+                            note = $" Это устройство уже №{ids.IndexOf(id) + 1}.";
+                            continue;
+                        }
+                        note = "";
+                        ids.Add(id);
+                        picked.Add(reference.ElementId);
+
+                        if (canPaint)
+                        {
+                            try
+                            {
+                                using (var paintStep = new Transaction(doc, "подсветка"))
+                                {
+                                    paintStep.Start();
+                                    view.SetElementOverrides(reference.ElementId, paint);
+                                    paintStep.Commit();
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                canPaint = false; // вид занят другим пользователем или не допускает переопределений: остаётся выделение
+                            }
+                        }
+                        uiDoc.Selection.SetElementIds(picked);
+                        uiDoc.RefreshActiveView();
+                    }
+                }
+                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                {
+                    // Esc — конец выбора.
+                }
+                finally
+                {
+                    group.RollBack(); // окраска временная: проект не меняется
                 }
             }
-            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            uiDoc.Selection.SetElementIds(picked);
+            uiDoc.RefreshActiveView();
+            return ids;
+        }
+
+        /// <summary>Зелёная сплошная заливка и линии; null — в проекте нет сплошной заливки.</summary>
+        private static OverrideGraphicSettings PickedOverride(Document doc)
+        {
+            FillPatternElement solid = new FilteredElementCollector(doc).OfClass(typeof(FillPatternElement))
+                .Cast<FillPatternElement>().FirstOrDefault(p => p.GetFillPattern().IsSolidFill);
+            var green = new Color(0, 176, 80);
+            var settings = new OverrideGraphicSettings()
+                .SetProjectionLineColor(green)
+                .SetProjectionLineWeight(6);
+            if (solid != null)
             {
-                return ids;
+                settings.SetSurfaceForegroundPatternId(solid.Id).SetSurfaceForegroundPatternColor(green);
             }
+            return settings;
         }
 
         private static ISelectionFilter DeviceFilter(string system)
@@ -193,7 +271,7 @@ namespace PluginForRevit2022
             Row("БЦО (если для семейства не задано в настройках)", _bco);
             Row("Номер линии", _line);
             Row("Комментарии (значение для отбора в журнале)", _comments);
-            Row("Этаж числом (пусто — из имени уровня)", _floor);
+            Row("Этаж для уровней без номера в имени (например «Тех. Пространство»)", _floor);
             Row("Параметр этажа для СОУЭ", _standard);
             Row("Начать нумерацию с", _start);
 

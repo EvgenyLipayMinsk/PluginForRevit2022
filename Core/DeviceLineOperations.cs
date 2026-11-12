@@ -58,8 +58,9 @@ namespace PluginForRevit2022.Core
                     Key = g.Key,
                     System = titles[SystemOf(first)],
                     Building = Read(first, Building),
-                    Controller = aps ? Read(first, Controller) : address[0],
-                    Line = aps ? Read(first, LineNumber) : (address.Length > 1 ? address[1] : ""),
+                    // СОТС: «прибор.шлейф»; СОУЭ: только номер шлейфа.
+                    Controller = aps ? Read(first, Controller) : (address.Length > 1 ? address[0] : ""),
+                    Line = aps ? Read(first, LineNumber) : (address.Length > 1 ? address[1] : address[0]),
                     Devices = g.Value.Count,
                 };
             }).OrderBy(l => l.System).ThenBy(l => l.Building).ThenBy(l => l.Controller).ThenBy(l => l.Line).ToList();

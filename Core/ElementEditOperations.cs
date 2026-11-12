@@ -149,23 +149,31 @@ namespace PluginForRevit2022.Core
             List<ElementId> elementIds = OpsCommon.Elements(doc, ids).Select(e => e.Id).ToList();
             if (toViews == null || toViews.Count == 0) throw new ArgumentException("Укажите toViews.");
             var results = new List<Dictionary<string, object>>();
-            using (var transaction = new Transaction(doc, "AerBIM: копировать на виды"))
+            List<View> targets = toViews.Select(v => ViewOperations.ResolveView(doc, v)).ToList();
+            using (var group = new TransactionGroup(doc, "AerBIM: копировать на виды"))
             {
-                transaction.Start();
-                foreach (string value in toViews)
+                group.Start();
+                foreach (View target in targets)
                 {
-                    View target = ViewOperations.ResolveView(doc, value);
-                    try
+                    using (ViewSession.Open(doc, target))
+                    using (var transaction = new Transaction(doc, "AerBIM: копировать на вид " + target.Name))
                     {
-                        int copied = ElementTransformUtils.CopyElements(source, elementIds, target, Transform.Identity, new CopyPasteOptions()).Count;
-                        results.Add(new Dictionary<string, object> { ["view"] = target.Name, ["copied"] = copied });
-                    }
-                    catch (Exception ex)
-                    {
-                        results.Add(new Dictionary<string, object> { ["view"] = target.Name, ["error"] = ex.Message });
+                        transaction.Start();
+                        try
+                        {
+                            int copied = ElementTransformUtils.CopyElements(source, elementIds, target, Transform.Identity, new CopyPasteOptions()).Count;
+                            transaction.Commit();
+                            results.Add(new Dictionary<string, object> { ["view"] = target.Name, ["copied"] = copied });
+                        }
+                        catch (Exception ex)
+                        {
+                            if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
+                            results.Add(new Dictionary<string, object> { ["view"] = target.Name, ["error"] = ex.Message });
+                        }
                     }
                 }
-                OpsCommon.Finish(transaction, dryRun);
+                if (dryRun) group.RollBack();
+                else group.Assimilate();
             }
             return new Dictionary<string, object>
             {
@@ -352,6 +360,7 @@ namespace PluginForRevit2022.Core
                 }
                 if (halftone != null) overrides.SetHalftone(halftone.Value);
             }
+            using (ViewSession.Open(doc, view))
             using (var transaction = new Transaction(doc, "AerBIM: графика элементов"))
             {
                 transaction.Start();

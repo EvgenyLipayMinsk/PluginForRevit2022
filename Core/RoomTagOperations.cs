@@ -55,6 +55,7 @@ namespace PluginForRevit2022.Core
 
             var perSource = new List<Dictionary<string, object>>();
             int created = 0;
+            using (ViewSession.Open(doc, view))
             using (var transaction = new Transaction(doc, "AerBIM: марки помещений"))
             {
                 transaction.Start();

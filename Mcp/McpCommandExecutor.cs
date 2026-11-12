@@ -198,6 +198,9 @@ namespace PluginForRevit2022.Mcp
 
             // Правка размеченной линии
             Register("list_marked_lines", (app, args) => DeviceLineOperations.ListLinesResult(ActiveProject(app)));
+            Register("check_journal_levels", (app, args) => JournalLevelCheck.Run(ActiveProject(app), args.Double("attachMm") ?? 600));
+            Register("assign_zkps", (app, args) => ZkpsOperations.Assign(ActiveProject(app), args.String("groupContains"), args.Double("cellMm") ?? 150, args.Bool("dryRun") ?? true, args.String("commentsContains")));
+            Register("assign_devices_to_lines", (app, args) => LineAssignmentOperations.Assign(ActiveProject(app), args.Double("maxDistanceMm") ?? 500));
             Register("add_device_to_line", (app, args) => DeviceLineOperations.Add(ActiveProject(app),
                 args.String("line"), args.Long("afterId"),
                 args.Long("deviceId") ?? throw new ArgumentException("Укажите deviceId."),
@@ -462,7 +465,16 @@ namespace PluginForRevit2022.Mcp
             string arguments = PluginLog.Short(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(request.Parameters));
             try
             {
-                object data = handler(uiApp, new McpArgs(request.Parameters));
+                ViewSession.Ui = uiApp.ActiveUIDocument;
+                object data;
+                try
+                {
+                    data = handler(uiApp, new McpArgs(request.Parameters));
+                }
+                finally
+                {
+                    ViewSession.Ui = null;
+                }
                 PluginLog.Info("mcp", $"{name} | OK | {timer.ElapsedMilliseconds} мс | {arguments}");
                 return McpResponse.Ok(request.RequestId, data);
             }

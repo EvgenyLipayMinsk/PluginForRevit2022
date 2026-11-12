@@ -525,8 +525,34 @@ namespace ARBM.CableJournalExporter.Services
         /// <returns>
         /// The numeric level ID, or -1 if the level cannot be resolved.
         /// </returns>
+        /// <summary>
+        /// Уровень по ADSK_Этаж (только цифра): «3» → уровень с номером 3 в имени («Этаж 03»).
+        /// Номер, которого нет в именах уровней (техпространство, этаж 6), — уровень по высоте элемента
+        /// (ближайший не выше точки, +50 мм). Пусто или не число — −1, дальше прежние правила.
+        /// Так трасса под перекрытием и устройства её этажа попадают в один граф, без «мостов».
+        /// </summary>
+        private long GetLevelIdFromFloorNumber(Element el)
+        {
+            string floor = el.LookupParameter("ADSK_Этаж")?.AsString()?.Trim();
+            if (string.IsNullOrEmpty(floor) || !int.TryParse(floor, out int number)) return -1;
+            foreach (var pair in _levelsById)
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(pair.Value.Name ?? "", @"-?\d+");
+                if (match.Success && int.Parse(match.Value) == number) return pair.Key;
+            }
+            XYZ point = el.Location is LocationPoint lp ? lp.Point
+                : el.Location is LocationCurve lc ? (lc.Curve.GetEndPoint(0) + lc.Curve.GetEndPoint(1)) / 2 : null;
+            if (point == null) return -1;
+            var byHeight = _levelsById.Where(p => p.Value.ProjectElevation <= point.Z + 50 / 304.8)
+                .OrderByDescending(p => p.Value.ProjectElevation).Select(p => (long?)p.Key).FirstOrDefault();
+            return byHeight ?? -1;
+        }
+
         private long GetLevelIdFromHost(Element el)
         {
+            long byFloor = GetLevelIdFromFloorNumber(el);
+            if (byFloor != -1) return byFloor;
+
             var host = ((FamilyInstance)el).Host;
             if (host != null)
             {
@@ -1185,7 +1211,7 @@ namespace ARBM.CableJournalExporter.Services
         /// </para>
         /// </param>
 
-        public void BuildGraphsByLevel(Document doc, List<ControllerWithLoops> controllers, string filterParam = "")
+        public void BuildGraphsByLevel(Document doc, List<ControllerWithLoops> controllers, string filterParam = "", Func<Element, bool> routeFilter = null)
         {
             // Кэшируем уровни Revit в локальную структуру.
             // EN: Cache all Revit levels into internal dictionary.
@@ -1213,9 +1239,14 @@ namespace ARBM.CableJournalExporter.Services
             // EN: Default: no filtering.
             IEnumerable<Element> filteredElements = collector;
 
+            // Маркировка AerBIM передаёт свой отбор трасс (по ADSK_Группирование); журнал его не задаёт.
+            if (routeFilter != null)
+            {
+                filteredElements = collector.Where(routeFilter);
+            }
             // Если задан фильтр по параметру "Комментарии" — применяем его.
             // EN: Apply comment-based filter if provided.
-            if (!string.IsNullOrEmpty(filterParam))
+            else if (!string.IsNullOrEmpty(filterParam))
             {
                 filteredElements = collector.Where(el =>
                 {

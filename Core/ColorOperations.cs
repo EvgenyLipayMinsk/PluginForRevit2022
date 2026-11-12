@@ -27,6 +27,7 @@ namespace PluginForRevit2022.Core
             if (elements.Count == 0) throw new InvalidOperationException($"На виде «{view.Name}» нет элементов указанных категорий.");
 
             var legend = new List<Dictionary<string, object>>();
+            using (ViewSession.Open(doc, view))
             using (var transaction = new Transaction(doc, reset ? "AerBIM: сбросить раскраску" : "AerBIM: раскраска по параметру"))
             {
                 transaction.Start();

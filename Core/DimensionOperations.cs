@@ -729,35 +729,54 @@ namespace PluginForRevit2022.Core
             var results = new List<Dictionary<string, object>>();
             int created = 0;
             long setupMs;
-            using (var transaction = new Transaction(doc, title))
+            using (var group = new TransactionGroup(doc, title))
             {
-                transaction.Start();
-                start?.Invoke();
+                group.Start();
+                if (start != null)
+                {
+                    using (var setup = new Transaction(doc, title + ": подготовка"))
+                    {
+                        setup.Start();
+                        start();
+                        setup.Commit();
+                    }
+                }
                 setupMs = total.ElapsedMilliseconds;
                 foreach (ViewPlan view in views)
                 {
                     var timer = System.Diagnostics.Stopwatch.StartNew();
                     Dictionary<string, object> result;
-                    try
+                    using (ViewSession.Open(doc, view)) // открыть план, расставить размеры, закрыть
+                    using (var transaction = new Transaction(doc, title + ": " + view.Name))
                     {
-                        using (var sub = new SubTransaction(doc))
+                        transaction.Start();
+                        try
                         {
-                            sub.Start();
                             result = work(view);
-                            sub.Commit();
+                            if (transaction.Commit() != TransactionStatus.Committed) throw new InvalidOperationException("Revit не применил изменения.");
+                            result["status"] = "ok";
                         }
-                        result["status"] = "ok";
-                    }
-                    catch (Exception ex) when (views.Count > 1)
-                    {
-                        result = new Dictionary<string, object> { ["view"] = view.Name, ["status"] = "failed", ["created"] = 0, ["error"] = ex.Message };
+                        catch (Exception ex) when (views.Count > 1)
+                        {
+                            if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
+                            result = new Dictionary<string, object> { ["view"] = view.Name, ["status"] = "failed", ["created"] = 0, ["error"] = ex.Message };
+                        }
                     }
                     result["elapsedMs"] = timer.ElapsedMilliseconds;
                     created += (int)result["created"];
                     results.Add(result);
                 }
-                end?.Invoke();
-                Finish(transaction, dryRun, created);
+                if (end != null)
+                {
+                    using (var cleanup = new Transaction(doc, title + ": очистка"))
+                    {
+                        cleanup.Start();
+                        end();
+                        cleanup.Commit();
+                    }
+                }
+                if (dryRun || created == 0) group.RollBack();
+                else if (group.Assimilate() != TransactionStatus.Committed) throw new InvalidOperationException("Revit не применил изменения.");
             }
 
             if (views.Count == 1)

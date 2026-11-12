@@ -171,6 +171,9 @@ namespace ARBM.CableJournalExporter.Models
         /// </summary>
         public int? ZkpsNumber { get; set; }
 
+        /// <summary>ARBM_ЗКПС как записан в модели (например «3.21»); null — устройство вне ЗКПС.</summary>
+        public string ZkpsText { get; set; }
+
         /// <summary>
         /// Номер этажа, на котором расположено устройство.
         /// Парсится из параметра ADSK_Этаж.
@@ -183,7 +186,7 @@ namespace ARBM.CableJournalExporter.Models
         /// Флаг, указывающий, принадлежит ли устройство зоне контроля (имеет непустой ARBM_ЗКПС).
         /// EN: Flag indicating whether device belongs to control zone (has non-empty ARBM_ЗКПС).
         /// </summary>
-        public bool IsHasZkps => ZkpsNumber.HasValue && ZkpsNumber.Value > 0;
+        public bool IsHasZkps => !string.IsNullOrEmpty(ZkpsText) || (ZkpsNumber.HasValue && ZkpsNumber.Value > 0);
 
         /// <summary>
         /// Создаёт строковое представление для логирования и отладки.
@@ -195,7 +198,7 @@ namespace ARBM.CableJournalExporter.Models
         {
             if (IsHasZkps)
             {
-                return $"{BuildingCode}.{ControllerNumber}.{SystemCode}.{LineNumber}.{DeviceNumberInLine}({ZkpsNumber})";
+                return $"{BuildingCode}.{ControllerNumber}.{SystemCode}.{LineNumber}.{DeviceNumberInLine}({ZkpsText ?? ZkpsNumber?.ToString()})";
             }
             else
             {

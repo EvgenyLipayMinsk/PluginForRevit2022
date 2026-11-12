@@ -61,9 +61,13 @@ namespace PluginForRevit2022
                 journalPanel.AddItem(button);
             }
 
+            #endregion
+
+            #region Маркировка
+            var markingPanel = application.CreateRibbonPanel(tabName, "Маркировка");
             var markIcon = Mcp.McpHost.CreateIndicator(journalColor, 32, "№");
             var markMenuData = new PulldownButtonData("Маркировка", "Маркировка") { LargeImage = markIcon, ToolTip = "Маркировка устройств для кабельного журнала." };
-            var markMenu = (PulldownButton)journalPanel.AddItem(markMenuData);
+            var markMenu = (PulldownButton)markingPanel.AddItem(markMenuData);
             foreach (var (id, text, command, tip) in new[]
             {
                 ("Создать маркировку", "Создать маркировку", "GuardMarkDevices", "Заполнить параметры устройств шлейфа: номера кликами или по трассам."),
@@ -80,16 +84,36 @@ namespace PluginForRevit2022
             var markSettingsButton = new PushButtonData("Настройки маркировки", "Настройки\rмаркировки", curAssembly, "PluginForRevit2022.GuardMarkingSettings");
             markSettingsButton.ToolTip = "Какое БЦО применять к семействам и какие семейства участвуют в линии КЖ.";
             markSettingsButton.LargeImage = Mcp.McpHost.CreateIndicator(journalColor, 32, "БЦО");
-            journalPanel.AddItem(markSettingsButton);
+            markingPanel.AddItem(markSettingsButton);
+            #endregion
 
+            #region Размещение оборудования
+            var placementPanel = application.CreateRibbonPanel(tabName, "Размещение оборудования");
             var detectorsButton = new PushButtonData("Извещатели", "Извещатели", curAssembly, "PluginForRevit2022.GuardPlaceDetectors");
             detectorsButton.ToolTip = "Разместить дымовые или тепловые извещатели в помещении кликом на плане (СП 484 с Изменением № 1).";
             detectorsButton.LargeImage = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(198, 40, 40), 32, "ИП");
-            journalPanel.AddItem(detectorsButton);
+            placementPanel.AddItem(detectorsButton);
             #endregion
 
             #region Поддержка
             var supportPanel = application.CreateRibbonPanel(tabName, "Поддержка");
+            var helpIcon = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(21, 101, 192), 32, "?");
+            var helpMenu = (PulldownButton)supportPanel.AddItem(new PulldownButtonData("Инструкция КЖ", "Инструкция")
+            {
+                LargeImage = helpIcon,
+                ToolTip = "Что и в каком порядке сделать и какие параметры заполнить, чтобы получился кабельный журнал.",
+            });
+            foreach (var (id, text, command) in new[]
+            {
+                ("Инструкция АПС", "АПС", "CmdInstructionAps"),
+                ("Инструкция СОТС", "СОТС", "CmdInstructionSecurity"),
+                ("Инструкция СОУЭ", "СОУЭ", "CmdInstructionSouye"),
+            })
+            {
+                var item = new PushButtonData(id, text, curAssembly, "PluginForRevit2022." + command) { LargeImage = helpIcon, ToolTip = $"Инструкция: кабельный журнал {text}." };
+                helpMenu.AddPushButton(item);
+            }
+
             var saveLog = new PushButtonData("Сохранить лог", "Сохранить\rлог", curAssembly, "PluginForRevit2022.CmdSaveLog");
             saveLog.ToolTip = "Сохранить журнал действий плагина и сведения о компьютере в ZIP-архив для разработчика.";
             saveLog.LargeImage = Mcp.McpHost.CreateIndicator(System.Windows.Media.Color.FromRgb(97, 97, 97), 32, "LOG");

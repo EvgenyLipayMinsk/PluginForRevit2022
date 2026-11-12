@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -25,6 +25,7 @@ namespace PluginForRevit2022.Core
                 : new FilteredElementCollector(doc).OfClass(typeof(TextNoteType)).FirstOrDefault(t => string.Equals(t.Name, typeName.Trim(), StringComparison.CurrentCultureIgnoreCase))?.Id
                   ?? throw new ArgumentException($"Тип текста «{typeName}» не найден.");
             long id;
+            using (ViewSession.Open(doc, view))
             using (var transaction = new Transaction(doc, "AerBIM: текст"))
             {
                 transaction.Start();
@@ -53,6 +54,7 @@ namespace PluginForRevit2022.Core
             for (int i = 0; i < points.Count; i++) loop.Append(Line.CreateBound(points[i], points[(i + 1) % points.Count]));
 
             long id;
+            using (ViewSession.Open(doc, view))
             using (var transaction = new Transaction(doc, "AerBIM: штриховка"))
             {
                 transaction.Start();
@@ -169,42 +171,68 @@ namespace PluginForRevit2022.Core
                 type = ElementEditOperations.ResolveType(doc, tagType) as FamilySymbol ?? throw new ArgumentException($"«{tagType}» — не тип марки.");
             }
 
+            // Предпросмотр ничего не создаёт: считает устройства без марки и проверяет, есть ли семейство марки.
+            // Запись — одна транзакция без подтранзакций: Revit перестраивает вид один раз, а не на каждую марку.
             var created = new Dictionary<string, int>();
             var failures = new Dictionary<string, string>();
+            var failedCount = new Dictionary<string, int>();
             int skipped = 0;
             double offset = RevitText.ToFeet(offsetMm);
-            using (var transaction = new Transaction(doc, "AerBIM: марки оборудования"))
+            List<Element> toTag = new List<Element>();
+            foreach (Element element in elements)
             {
-                transaction.Start();
-                foreach (Element element in elements)
+                if (tagged.Contains(RevitIds.IdOf(element.Id))) skipped++;
+                else if (LinkScope.LocationOf(element) != null) toTag.Add(element);
+            }
+
+            if (dryRun)
+            {
+                foreach (IGrouping<string, Element> group in toTag.GroupBy(e => e.Category.Name))
                 {
-                    if (tagged.Contains(RevitIds.IdOf(element.Id)))
+                    if (type == null && !HasTagFamily(doc, group.First().Category))
                     {
-                        skipped++;
-                        continue;
+                        failures[group.Key] = "в проекте нет загруженного семейства марки для этой категории";
+                        failedCount[group.Key] = group.Count();
                     }
-                    XYZ point = LinkScope.LocationOf(element);
-                    if (point == null) continue;
-                    string category = element.Category.Name;
-                    using (var sub = new SubTransaction(doc))
+                    else
                     {
-                        sub.Start();
+                        created[group.Key] = group.Count();
+                    }
+                }
+            }
+            else if (toTag.Count > 0)
+            {
+                using (ViewSession.Open(doc, view)) // открыть вид, поставить марки, закрыть
+                using (var transaction = new Transaction(doc, "AerBIM: марки оборудования"))
+                {
+                    FailureHandlingOptions options = transaction.GetFailureHandlingOptions();
+                    options.SetFailuresPreprocessor(new HideWarnings());
+                    options.SetClearAfterRollback(true);
+                    transaction.SetFailureHandlingOptions(options);
+                    transaction.Start();
+                    foreach (Element element in toTag)
+                    {
+                        string category = element.Category.Name;
+                        if (failures.ContainsKey(category))
+                        {
+                            failedCount[category]++;
+                            continue; // для категории уже нет семейства марки: не пробуем каждый элемент
+                        }
                         try
                         {
                             IndependentTag tag = IndependentTag.Create(doc, view.Id, new Reference(element), leader, TagMode.TM_ADDBY_CATEGORY,
-                                TagOrientation.Horizontal, point + new XYZ(0, offset, 0));
+                                TagOrientation.Horizontal, LinkScope.LocationOf(element) + new XYZ(0, offset, 0));
                             if (type != null && tag.GetTypeId() != type.Id) tag.ChangeTypeId(type.Id);
-                            sub.Commit();
                             created[category] = (created.TryGetValue(category, out int n) ? n : 0) + 1;
                         }
                         catch (Exception ex)
                         {
-                            if (sub.GetStatus() == TransactionStatus.Started) sub.RollBack();
-                            if (!failures.ContainsKey(category)) failures[category] = ex.Message;
+                            failures[category] = ex.Message;
+                            failedCount[category] = 1;
                         }
                     }
+                    OpsCommon.Finish(transaction, created.Count == 0);
                 }
-                OpsCommon.Finish(transaction, dryRun || created.Count == 0);
             }
             int total = created.Values.Sum();
             return new Dictionary<string, object>
@@ -214,9 +242,48 @@ namespace PluginForRevit2022.Core
                 ["created"] = created,
                 ["alreadyTagged"] = skipped,
                 ["failedCategories"] = failures,
+                ["failedCount"] = failedCount,
                 ["summary"] = OpsCommon.Summary(dryRun, $"будет поставлено марок: {total}, уже с марками: {skipped}", $"Поставлено марок: {total}, уже были: {skipped}.")
                               + (failures.Count > 0 ? " Для части категорий марки не созданы: проверьте, загружены ли семейства марок." : ""),
             };
+        }
+
+        /// <summary>Есть ли в проекте тип марки для категории элемента (марка категории или марка «многокатегорийная»).</summary>
+        private static bool HasTagFamily(Document doc, Category category)
+        {
+            if (!TagCategories.TryGetValue(RevitIds.IdOf(category.Id), out BuiltInCategory tagCategory)) return true; // неизвестная категория: проверится при записи
+            ElementId tagCategoryId = new ElementId(tagCategory);
+            if (doc.GetDefaultFamilyTypeId(tagCategoryId) != ElementId.InvalidElementId) return true;
+            return new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).WhereElementIsElementType()
+                .Any(s => s.Category != null && s.Category.Id == tagCategoryId);
+        }
+
+        private static readonly Dictionary<long, BuiltInCategory> TagCategories = new Dictionary<long, BuiltInCategory>
+        {
+            [(long)BuiltInCategory.OST_FireAlarmDevices] = BuiltInCategory.OST_FireAlarmDeviceTags,
+            [(long)BuiltInCategory.OST_DataDevices] = BuiltInCategory.OST_DataDeviceTags,
+            [(long)BuiltInCategory.OST_NurseCallDevices] = BuiltInCategory.OST_NurseCallDeviceTags,
+            [(long)BuiltInCategory.OST_CommunicationDevices] = BuiltInCategory.OST_CommunicationDeviceTags,
+            [(long)BuiltInCategory.OST_SecurityDevices] = BuiltInCategory.OST_SecurityDeviceTags,
+            [(long)BuiltInCategory.OST_TelephoneDevices] = BuiltInCategory.OST_TelephoneDeviceTags,
+            [(long)BuiltInCategory.OST_ElectricalEquipment] = BuiltInCategory.OST_ElectricalEquipmentTags,
+            [(long)BuiltInCategory.OST_ElectricalFixtures] = BuiltInCategory.OST_ElectricalFixtureTags,
+            [(long)BuiltInCategory.OST_LightingDevices] = BuiltInCategory.OST_LightingDeviceTags,
+            [(long)BuiltInCategory.OST_LightingFixtures] = BuiltInCategory.OST_LightingFixtureTags,
+            [(long)BuiltInCategory.OST_MechanicalEquipment] = BuiltInCategory.OST_MechanicalEquipmentTags,
+        };
+
+        /// <summary>Предупреждения Revit (например, о перекрытии марок) не открывают окно и не останавливают MCP.</summary>
+        private sealed class HideWarnings : IFailuresPreprocessor
+        {
+            public FailureProcessingResult PreprocessFailures(FailuresAccessor failures)
+            {
+                foreach (FailureMessageAccessor failure in failures.GetFailureMessages())
+                {
+                    if (failure.GetSeverity() == FailureSeverity.Warning) failures.DeleteWarning(failure);
+                }
+                return FailureProcessingResult.Continue;
+            }
         }
     }
 }

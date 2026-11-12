@@ -132,6 +132,7 @@ namespace ARBM.CableJournalExporter.Services
                 int? lineNumber = GetIntParameter(element, Param_LineNumber);
                 int? deviceNumberInLine = GetIntParameter(element, Param_DeviceNumberInLine);
                 int? zkpsNumber = GetIntParameter(element, Param_ZkpsNumber);
+                string zkpsText = GetStringParameter(element, Param_ZkpsNumber)?.Trim();
                 string systemCode = GetStringParameter(element, Param_SystemCode);
 
                 if (string.IsNullOrWhiteSpace(buildingCode) ||
@@ -156,7 +157,8 @@ namespace ARBM.CableJournalExporter.Services
                     SystemCode = systemCode,
                     LineNumber = lineNumber.Value,
                     DeviceNumberInLine = deviceNumberInLine.Value,
-                    ZkpsNumber = zkpsNumber > 0 ? zkpsNumber : null
+                    ZkpsNumber = zkpsNumber > 0 ? zkpsNumber : null,
+                    ZkpsText = string.IsNullOrEmpty(zkpsText) || zkpsText == "0" ? null : zkpsText
                 };
 
                 return deviceInfo;

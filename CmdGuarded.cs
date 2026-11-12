@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using ARBM.CableJournalExporter.Commands;
@@ -25,7 +25,16 @@ namespace PluginForRevit2022
                     PluginLog.Info("command.end", $"{name} | Cancelled на проверке параметров | {timer.ElapsedMilliseconds} мс");
                     return Result.Cancelled;
                 }
-                Result result = new TCommand().Execute(commandData, ref message, elements);
+                Result result;
+                ViewSession.Ui = commandData.Application.ActiveUIDocument; // команды на нескольких видах открывают их по очереди
+                try
+                {
+                    result = new TCommand().Execute(commandData, ref message, elements);
+                }
+                finally
+                {
+                    ViewSession.Ui = null;
+                }
                 PluginLog.Info("command.end", $"{name} | {result} | {timer.ElapsedMilliseconds} мс" + (string.IsNullOrEmpty(message) ? "" : " | " + message));
                 return result;
             }

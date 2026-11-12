@@ -1,239 +1,123 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Autodesk.Revit.Attributes;
-using Autodesk.Revit.DB;
-using Autodesk.Revit.Exceptions;
+﻿using System.Collections.Generic;
 using Autodesk.Revit.UI;
-using System.Windows.Media.Imaging;
-using System.Diagnostics;
-using System.IO;
-using Autodesk.Revit.UI.Events;
+using PluginForRevit2022.UI;
 
 namespace PluginForRevit2022
 {
     internal class App : IExternalApplication
     {
-        static string ButtonIconsFolder = @"D:\Visual Studio\PluginForRevit2022\Resourses";
-        static string ButtonIconsFolder_Test = @"D:\Visual Studio\Examples\Aerbim.Multicompilation.Test\Aerbim.Multicompilation.Test\Ribbon";
         public Result OnShutdown(UIControlledApplication application)
         {
+            Mcp.McpHost.Stop(); // освободить порт при закрытии Revit
+            Core.PluginLog.Info("revit.shutdown");
             return Result.Succeeded;
         }
 
         public Result OnStartup(UIControlledApplication application)
         {
+            Core.PluginLog.Cleanup();
+            Core.PluginLog.Info("revit.startup", $"{application.ControlledApplication.VersionName} {application.ControlledApplication.VersionBuild} | плагин " +
+                System.Reflection.Assembly.GetExecutingAssembly().GetName().Version + " | " + System.Environment.MachineName);
+
+            // Лента в стиле Revit: линейные значки, главные команды — крупные, второстепенные — мелкие стопкой
             string tabName = "AerBIM Manager";
-            string panelNameWorkTools = "Work Tools";
             application.CreateRibbonTab(tabName);
-           
-            var workPanel = application.CreateRibbonPanel(tabName, panelNameWorkTools);
-            
+            string asm = System.Reflection.Assembly.GetExecutingAssembly().Location;
 
+            PushButtonData Button(string id, string text, string command, string icon, string tip, string details = null)
+            {
+                var data = new PushButtonData(id, text, asm, "PluginForRevit2022." + command)
+                {
+                    LargeImage = RibbonIcons.Large(icon),
+                    Image = RibbonIcons.Small(icon),
+                    ToolTip = tip,
+                };
+                if (details != null) data.LongDescription = details;
+                return data;
+            }
 
-
-            string curAssembly = System.Reflection.Assembly.GetExecutingAssembly().Location;
-            string curAssemblyPath = Path.GetDirectoryName(curAssembly);
-
-            PushButtonData pbd1 = new PushButtonData("Convert to RVT2022", "Convert File\rto RVT2022", curAssembly, "PluginForRevit2022.CmdConvertationForRevitVersion");
-            pbd1.ToolTip = "This is ToolTip";
-            pbd1.LongDescription = "This is Long description";
-
-            pbd1.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "DB.ico"), UriKind.Absolute));
-            
-            var pb1 = workPanel.AddItem(pbd1) as PushButton;
-
-            SplitButtonData splitMainButton = new SplitButtonData("Main Button", "Main Button");
-            //splitMainButton.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "settingsMain.ico"), UriKind.Absolute));
-            SplitButton sButton = workPanel.AddItem(splitMainButton) as SplitButton;
-            
-
-            PushButtonData pbd2 = new PushButtonData("Button1", "Main\rButton", curAssembly, "Main Button");
-            pbd2.ToolTip = "This is ToolTip";
-            pbd2.LongDescription = "This is Long description";
-
-            pbd2.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "settingsMain.ico"), UriKind.Absolute));
-
-            var pb2 = sButton.AddPushButton(pbd2);
-            pb2 = (PushButton)workPanel.AddItem(pbd2);
-
-            workPanel.AddSeparator();
-
-            PushButtonData pbd3 = new PushButtonData("Button2", "Button2", curAssembly, "Button2");
-            pbd3.ToolTip = "This is ToolTip";
-            pbd3.LongDescription = "This is Long description of button2";
-
-            pbd3.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "button1.ico"), UriKind.Absolute));
-
-            var pb3 = sButton.AddPushButton(pbd3);
-            pb3 = (PushButton)workPanel.AddItem(pbd3);
-
-            PushButtonData pbd4 = new PushButtonData("Button3", "Button3", curAssembly, "Button3");
-            pbd4.ToolTip = "This is ToolTip";
-            pbd4.LongDescription = "This is Long description of button3";
-
-            
-            pbd4.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "button2.ico"), UriKind.Absolute));
-
-            var pb4 = sButton.AddPushButton(pbd4);
-            pb4 = (PushButton)workPanel.AddItem(pbd4);
-
-            workPanel.AddSlideOut();
-
-            TextBoxData testBoxData1 = new TextBoxData("WallMark");
-            Autodesk.Revit.UI.TextBox textBox1 = (Autodesk.Revit.UI.TextBox)(workPanel.AddItem(testBoxData1));
-            textBox1.Value = "Example of text"; //default wall mark
-            textBox1.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-folders-32.ico"), UriKind.Absolute));
-            textBox1.ToolTip = "Set the mark for new wall";
-            textBox1.ShowImageAsButton = true;
-            textBox1.EnterPressed += new EventHandler<Autodesk.Revit.UI.Events.TextBoxEnterPressedEventArgs>(SetTextBoxValue);
-
-
-            string panelNameExampleTools = "Example Tools";
-            var examplePanel = application.CreateRibbonPanel(tabName, panelNameExampleTools);
-
-            
-
-
-            ComboBoxData comboBoxDataExample1 = new ComboBoxData("Example1ComboBox");
-            ComboBoxData comboBoxDataExample2 = new ComboBoxData("Example2ComboBox");
-            IList<RibbonItem> ribbonItemsStackedExample = examplePanel.AddStackedItems(comboBoxDataExample1, comboBoxDataExample2);
-            ComboBox comboBoxExample1 = (ComboBox)(ribbonItemsStackedExample[0]);
-            ComboBoxMemberData comboBoxMemberDataEx = new ComboBoxMemberData("Папки", "Папки");
-            ComboBoxMember comboboxMemberEx = comboBoxExample1.AddItem(comboBoxMemberDataEx);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-folders-32.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx = new ComboBoxMemberData("Корзина", "Корзина");
-            comboboxMemberEx = comboBoxExample1.AddItem(comboBoxMemberDataEx);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-корзина-16.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx = new ComboBoxMemberData("Персональная папка", "Персональная папка");
-            comboboxMemberEx = comboBoxExample1.AddItem(comboBoxMemberDataEx);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-папка-пользователя-16.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx = new ComboBoxMemberData("Проводник", "Проводник");
-            comboboxMemberEx = comboBoxExample1.AddItem(comboBoxMemberDataEx);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-проводник-windows-16.ico"), UriKind.Absolute));
-
-
-            ComboBox comboBoxExample2 = (ComboBox)(ribbonItemsStackedExample[1]);
-            ComboBoxMemberData comboBoxMemberDataEx2 = new ComboBoxMemberData("Папки2", "Папки2");
-            ComboBoxMember comboboxMemberEx2 = comboBoxExample2.AddItem(comboBoxMemberDataEx2);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-folders-32.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx2 = new ComboBoxMemberData("Корзина", "Корзина");
-            comboboxMemberEx2 = comboBoxExample2.AddItem(comboBoxMemberDataEx2);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-корзина-16.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx2 = new ComboBoxMemberData("Персональная папка", "Персональная папка");
-            comboboxMemberEx2 = comboBoxExample2.AddItem(comboBoxMemberDataEx2);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-папка-пользователя-16.ico"), UriKind.Absolute));
-            comboBoxMemberDataEx2 = new ComboBoxMemberData("Проводник", "Проводник");
-            comboboxMemberEx2 = comboBoxExample2.AddItem(comboBoxMemberDataEx2);
-            //comboboxMemberEx.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder, "icons8-проводник-windows-16.ico"), UriKind.Absolute));
-
-            examplePanel.AddSlideOut();
-
-            string firstPanelName = "Ribbon Sample";
-            RibbonPanel ribbonSamplePanel = application.CreateRibbonPanel(tabName,firstPanelName);
-            //Create a SplitButton for user to create Non - Structural or Structural Wall
-            #region Create a SplitButton for user to create Non-Structural or Structural Wall
-            SplitButtonData splitButtonData = new SplitButtonData("NewWallSplit", "Create Wall");
-            SplitButton splitButton = ribbonSamplePanel.AddItem(splitButtonData) as SplitButton;
-            PushButton pushButton = splitButton.AddPushButton(new PushButtonData("WallPush", "Wall", curAssembly, "Revit.SDK.Samples.Ribbon.CS.CreateWall"));
-            pushButton.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "CreateWall.png"), UriKind.Absolute));
-            pushButton.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "CreateWall-S.png"), UriKind.Absolute));
-            pushButton.ToolTip = "Creates a partition wall in the building model.";
-            pushButton.ToolTipImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "CreateWallTooltip.bmp"), UriKind.Absolute));
-            pushButton = splitButton.AddPushButton(new PushButtonData("StrWallPush", "Structure Wall", curAssembly, "Revit.SDK.Samples.Ribbon.CS.CreateStructureWall"));
-            pushButton.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "StrcturalWall.png"), UriKind.Absolute));
-            pushButton.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "StrcturalWall-S.png"), UriKind.Absolute));
+            #region Параметры
+            var parametersPanel = application.CreateRibbonPanel(tabName, "Параметры");
+            parametersPanel.AddStackedItems(
+                Button("Add Shared Parameters", "Параметры из ФОП", "GuardAddSharedParameters", "fop",
+                    "Добавить общие параметры из ФОП в проект (с привязкой к категориям) или в открытое семейство.",
+                    "Выберите параметры, категории, тип или экземпляр и группу. Сначала «Предпросмотр», затем «Добавить». То же доступно ИИ через MCP (add_shared_parameters)."),
+                Button("Remove Parameters", "Удалить параметры", "GuardRemoveParameters", "removeParams",
+                    "Удалить параметры проекта: выберите их в списке."));
             #endregion
 
-            ribbonSamplePanel.AddSeparator();
-
-            #region Add a StackedButton which is consisted of one PushButton and two Comboboxes
-            PushButtonData pushButtonData = new PushButtonData("Reset", "Reset", curAssembly, "Revit.SDK.Samples.Ribbon.CS.ResetSetting");
-            ComboBoxData comboBoxDataLevel = new ComboBoxData("LevelsSelector");
-            ComboBoxData comboBoxDataShape = new ComboBoxData("WallShapeComboBox");
-            IList<RibbonItem> ribbonItemsStacked = ribbonSamplePanel.AddStackedItems(pushButtonData, comboBoxDataLevel, comboBoxDataShape);
-            ((PushButton)(ribbonItemsStacked[0])).Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "Reset.png"), UriKind.Absolute));
-            //Add options to WallShapeComboBox
-            Autodesk.Revit.UI.ComboBox comboboxWallShape = (Autodesk.Revit.UI.ComboBox)(ribbonItemsStacked[2]);
-            ComboBoxMemberData comboBoxMemberData = new ComboBoxMemberData("RectangleWall", "RectangleWall");
-            ComboBoxMember comboboxMember = comboboxWallShape.AddItem(comboBoxMemberData);
-            comboboxMember.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "RectangleWall.png"), UriKind.Absolute));
-            comboBoxMemberData = new ComboBoxMemberData("CircleWall", "CircleWall");
-            comboboxMember = comboboxWallShape.AddItem(comboBoxMemberData);
-            comboboxMember.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "CircleWall.png"), UriKind.Absolute));
-            comboBoxMemberData = new ComboBoxMemberData("TriangleWall", "TriangleWall");
-            comboboxMember = comboboxWallShape.AddItem(comboBoxMemberData);
-            comboboxMember.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "TriangleWall.png"), UriKind.Absolute));
-            comboBoxMemberData = new ComboBoxMemberData("SquareWall", "SquareWall");
-            comboboxMember = comboboxWallShape.AddItem(comboBoxMemberData);
-            comboboxMember.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "SquareWall.png"), UriKind.Absolute));
+            #region Кабельный журнал
+            var journalPanel = application.CreateRibbonPanel(tabName, "Кабельный журнал");
+            // Одна кнопка с меню: наверху последняя использованная система
+            var journal = (SplitButton)journalPanel.AddItem(new SplitButtonData("Кабельный журнал", "Кабельный\rжурнал"));
+            foreach (var (id, text, command, tip) in new[]
+            {
+                ("КЖ АПС", "Журнал\rАПС", "GuardJournalAps", "Кабельный журнал АПС: кликните элемент с нужными «Комментариями» (например прибор)."),
+                ("КЖ СОТС все", "Журнал СОТС\rвсе", "GuardJournalSecurityAll", "Кабельный журнал СОТС по всем контроллерам ARK.*."),
+                ("КЖ СОТС по параметру", "Журнал СОТС\rпо «Комментариям»", "GuardJournalSecurityByParam", "Кабельный журнал СОТС по значению «Комментарии» выбранного элемента."),
+                ("КЖ СОУЭ", "Журнал\rСОУЭ", "GuardJournalSouye", "Кабельный журнал СОУЭ по значению «Комментарии» выбранного элемента."),
+            })
+            {
+                journal.AddPushButton(Button(id, text, command, "journal", tip,
+                    "Длины считаются по трассам; участки, где трасс не хватило и длина взята по прямой, подсвечиваются жёлтым. " +
+                    "Если элементы не попали в журнал, плагин перечислит их и причину."));
+            }
             #endregion
 
-            ribbonSamplePanel.AddSeparator();
-
-            #region Add a RadioButtonGroup for user to select WallType
-            RadioButtonGroupData radioButtonGroupData = new RadioButtonGroupData("WallTypeSelector");
-            RadioButtonGroup radioButtonGroup = (RadioButtonGroup)(ribbonSamplePanel.AddItem(radioButtonGroupData));
-            ToggleButton toggleButton = radioButtonGroup.AddItem(new ToggleButtonData("Generic8", "Generic - 8\"", curAssembly, "Revit.SDK.Samples.Ribbon.CS.Dummy"));
-            toggleButton.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "Generic8.png"), UriKind.Absolute));
-            toggleButton.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "Generic8-S.png"), UriKind.Absolute));
-            toggleButton = radioButtonGroup.AddItem(new ToggleButtonData("ExteriorBrick", "Exterior - Brick", curAssembly, "Revit.SDK.Samples.Ribbon.CS.Dummy"));
-            toggleButton.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "ExteriorBrick.png"), UriKind.Absolute));
-            toggleButton.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "ExteriorBrick-S.png"), UriKind.Absolute));
+            #region Маркировка
+            var markingPanel = application.CreateRibbonPanel(tabName, "Маркировка");
+            markingPanel.AddItem(Button("Создать маркировку", "Маркировка", "GuardMarkDevices", "marking",
+                "Заполнить параметры устройств линии: номера по ходу кабеля от прибора или кликами по порядку.",
+                "Сначала кликните прибор, затем выделите устройства линии. Окно подтверждения покажет, что будет записано."));
+            markingPanel.AddStackedItems(
+                Button("Добавить устройство", "Добавить устройство", "GuardAddDeviceToLine", "addDevice",
+                    "Вставить устройство в размеченную линию после выбранного; следующие номера сдвигаются."),
+                Button("Удалить устройство", "Удалить устройство", "GuardRemoveDeviceFromLine", "removeDevice",
+                    "Снять маркировку с устройств и закрыть пропуски в номерах; этаж и ЗКПС остаются."),
+                Button("Настройки маркировки", "Настройки маркировки", "GuardMarkingSettings", "settings",
+                    "Какое БЦО применять к семействам, какие семейства участвуют в линии и запасы кабеля."));
             #endregion
 
-            //slide-out panel:
-            ribbonSamplePanel.AddSlideOut();
-
-            #region add a Text box to set the mark for new wall
-            TextBoxData testBoxData = new TextBoxData("WallMark");
-            Autodesk.Revit.UI.TextBox textBox = (Autodesk.Revit.UI.TextBox)(ribbonSamplePanel.AddItem(testBoxData));
-            textBox.Value = "new wall"; //default wall mark
-            textBox.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "WallMark.png"), UriKind.Absolute));
-            textBox.ToolTip = "Set the mark for new wall";
-            textBox.ShowImageAsButton = true;
-            textBox.EnterPressed += new EventHandler<Autodesk.Revit.UI.Events.TextBoxEnterPressedEventArgs>(SetTextBoxValue);
+            #region Размещение оборудования
+            var placementPanel = application.CreateRibbonPanel(tabName, "Размещение оборудования");
+            placementPanel.AddItem(Button("Извещатели", "Извещатели", "GuardPlaceDetectors", "detector",
+                "Разместить дымовые или тепловые извещатели в помещении кликом на плане (СП 484 с Изменением № 1)."));
             #endregion
 
-            ribbonSamplePanel.AddSeparator();
-
-            #region Create a StackedButton which consisted of a PushButton (delete all the walls) and a PulldownButton (move all the walls in X or Y direction)
-            PushButtonData deleteWallsButtonData = new PushButtonData("deleteWalls", "Delete Walls", curAssembly, "Revit.SDK.Samples.Ribbon.CS.DeleteWalls");
-            deleteWallsButtonData.ToolTip = "Delete all the walls created by the Create Wall tool.";
-            deleteWallsButtonData.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "DeleteWalls.png"), UriKind.Absolute));
-
-            PulldownButtonData moveWallsButtonData = new PulldownButtonData("moveWalls", "Move Walls");
-            moveWallsButtonData.ToolTip = "Move all the walls in X or Y direction";
-            moveWallsButtonData.Image = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "MoveWalls.png"), UriKind.Absolute));
-
-            // create stackable buttons
-            IList<RibbonItem> ribbonItems = ribbonSamplePanel.AddStackedItems(deleteWallsButtonData, moveWallsButtonData);
-
-            // add two push buttons as sub-items of the moveWalls PulldownButton. 
-            PulldownButton moveWallItem = ribbonItems[1] as PulldownButton;
-
-            PushButton moveX = moveWallItem.AddPushButton(new PushButtonData("XDirection", "X Direction", curAssembly, "Revit.SDK.Samples.Ribbon.CS.XMoveWalls"));
-            moveX.ToolTip = "move all walls 10 feet in X direction.";
-            moveX.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "MoveWallsXLarge.png"), UriKind.Absolute));
-
-            PushButton moveY = moveWallItem.AddPushButton(new PushButtonData("YDirection", "Y Direction", curAssembly, "Revit.SDK.Samples.Ribbon.CS.YMoveWalls"));
-            moveY.ToolTip = "move all walls 10 feet in Y direction.";
-            moveY.LargeImage = new BitmapImage(new Uri(Path.Combine(ButtonIconsFolder_Test, "MoveWallsYLarge.png"), UriKind.Absolute));
+            #region Поддержка
+            var supportPanel = application.CreateRibbonPanel(tabName, "Поддержка");
+            var helpData = new PulldownButtonData("Инструкция КЖ", "Инструкция")
+            {
+                LargeImage = RibbonIcons.Large("help"),
+                Image = RibbonIcons.Small("help"),
+                ToolTip = "Что и в каком порядке сделать и какие параметры заполнить, чтобы получился кабельный журнал.",
+            };
+            IList<RibbonItem> support = supportPanel.AddStackedItems(helpData,
+                Button("Сохранить лог", "Сохранить лог", "CmdSaveLog", "log",
+                    "Сохранить журнал действий плагина и сведения о компьютере в ZIP-архив для разработчика."));
+            var help = (PulldownButton)support[0];
+            foreach (var (id, text, command) in new[]
+            {
+                ("Инструкция АПС", "АПС", "CmdInstructionAps"),
+                ("Инструкция СОТС", "СОТС", "CmdInstructionSecurity"),
+                ("Инструкция СОУЭ", "СОУЭ", "CmdInstructionSouye"),
+            })
+            {
+                help.AddPushButton(Button(id, text, command, "help", $"Инструкция: кабельный журнал {text}."));
+            }
             #endregion
 
-            ribbonSamplePanel.AddSeparator();
+            #region MCP: соединение с ИИ-клиентом
+            var mcpPanel = application.CreateRibbonPanel(tabName, "MCP");
+            var toggleData = new PushButtonData("MCP Toggle", "MCP выкл", asm, "PluginForRevit2022.CmdMcpToggle");
+            IList<RibbonItem> mcp = mcpPanel.AddStackedItems(toggleData,
+                Button("MCP Reset", "Сброс MCP", "CmdMcpReset", "reset",
+                    "Разорвать текущее MCP-подключение и заново открыть порт " + Mcp.McpHost.Port + ".",
+                    "Используйте, если ИИ-клиент не может подключиться или соединение зависло. Если MCP был выключен, кнопка его включит."));
+            Mcp.McpHost.Initialize((PushButton)mcp[0]);
+            #endregion
 
-           // application.ControlledApplication.DocumentCreated += new EventHandler<Autodesk.Revit.DB.Events.DocumentCreatedEventArgs>(DocumentCreated);
-
-           
-
-            return Result.Succeeded;   
-        }
-        public void SetTextBoxValue(object sender, TextBoxEnterPressedEventArgs args)
-        {
-            TaskDialog.Show("TextBox EnterPressed Event", "New wall's mark changed.");
+            return Result.Succeeded;
         }
     }
 }

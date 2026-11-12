@@ -2,7 +2,7 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug R2022</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}</ProjectGuid>
     <OutputType>Library</OutputType>
@@ -13,67 +13,268 @@
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+  <!--
+    One configuration per Revit version. Pick it in the VS toolbar (e.g. "Debug R2023"):
+    the build references that version's RevitAPI, F5 starts that Revit,
+    and a Debug build registers the add-in in %AppData%\Autodesk\Revit\Addins\<version>.
+  -->
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2021|AnyCPU' ">
+    <RevitVersion>2021</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2021|AnyCPU' ">
+    <RevitVersion>2021</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2022|AnyCPU' ">
+    <RevitVersion>2022</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2023|AnyCPU' ">
+    <RevitVersion>2023</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug R2024|AnyCPU' ">
+    <RevitVersion>2024</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2022|AnyCPU' ">
+    <RevitVersion>2022</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2023|AnyCPU' ">
+    <RevitVersion>2023</RevitVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release R2024|AnyCPU' ">
+    <RevitVersion>2024</RevitVersion>
+  </PropertyGroup>
+  <!-- Settings shared by all versions -->
+  <PropertyGroup>
+    <RevitVersion Condition=" '$(RevitVersion)' == '' ">2022</RevitVersion>
+    <RevitInstallDir>C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitInstallDir>
+    <RevitAddinsDir>$(APPDATA)\Autodesk\Revit\Addins\$(RevitVersion)</RevitAddinsDir>
+    <IsDebugBuild>$(Configuration.StartsWith('Debug'))</IsDebugBuild>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <PlatformTarget>x64</PlatformTarget>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(IsDebugBuild)' == 'true' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+    <DefineConstants>DEBUG;TRACE;REVIT$(RevitVersion)</DefineConstants>
+    <!-- F5 launches the matching Revit instead of trying to run the DLL -->
+    <StartAction>Program</StartAction>
+    <StartProgram>$(RevitInstallDir)\Revit.exe</StartProgram>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  <PropertyGroup Condition=" '$(IsDebugBuild)' != 'true' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
+    <DefineConstants>TRACE;REVIT$(RevitVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="AlphaFS">
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\AlphaFS.dll</HintPath>
-    </Reference>
-    <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\Newtonsoft.Json.dll</HintPath>
-    </Reference>
     <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
     <Reference Include="RevitAPI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2022\RevitAPI.dll</HintPath>
+      <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="RevitAPIUI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2022\RevitAPIUI.dll</HintPath>
+      <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
       <Private>False</Private>
-    </Reference>
-    <Reference Include="ScanFolderCopyAndProcess">
-      <HintPath>..\Examples\Aerbim.3DSD.Test.RenameParametersOfFamilies\Aerbim.3DSD.Test.RenameParametersOfFamilies\ScanFolderCopyAndProcess\bin\Debug\ScanFolderCopyAndProcess.exe</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Transactions" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="EPPlus, Version=8.5.4.0">
+      <HintPath>packages\EPPlus.8.5.4\lib\net462\EPPlus.dll</HintPath>
+    </Reference>
+    <Reference Include="EPPlus.Interfaces, Version=8.4.0.0">
+      <HintPath>packages\EPPlus.Interfaces.8.4.0\lib\net462\EPPlus.Interfaces.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.IO.RecyclableMemoryStream">
+      <HintPath>packages\Microsoft.IO.RecyclableMemoryStream.3.0.1\lib\netstandard2.0\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>packages\System.Buffers.4.5.1\lib\net461\System.Buffers.dll</HintPath>
+    </Reference>
+    <Reference Include="System.ComponentModel.Annotations">
+      <HintPath>packages\System.ComponentModel.Annotations.5.0.0\lib\net461\System.ComponentModel.Annotations.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>packages\System.Memory.4.5.5\lib\net461\System.Memory.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>packages\System.Runtime.CompilerServices.Unsafe.4.5.3\lib\net461\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Security.Cryptography.Xml">
+      <HintPath>packages\System.Security.Cryptography.Xml.8.0.3\lib\net462\System.Security.Cryptography.Xml.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
-    <Compile Include="ArbmAPIElementHelper.cs" />
-    <Compile Include="ArbmFamiliesManager.cs" />
-    <Compile Include="CmdConvertationForRevitVersion.cs" />
-    <Compile Include="CmdRenameParametersForFamilies.cs" />
+    <Compile Include="CmdAddSharedParameters.cs" />
+    <Compile Include="CmdMcp.cs" />
+    <Compile Include="CmdMarkDevices.cs" />
+    <Compile Include="CmdGuarded.cs" />
+    <Compile Include="CmdInstructions.cs" />
+    <Compile Include="CmdSaveLog.cs" />
+    <Compile Include="CmdDeviceLine.cs" />
+    <Compile Include="CmdMarkingSettings.cs" />
+    <Compile Include="CmdPlaceDetectors.cs" />
+    <Compile Include="CmdRemoveParameters.cs" />
+    <Compile Include="Core\DimensionOperations.cs" />
+    <Compile Include="Core\LinkScope.cs" />
+    <Compile Include="Core\ParameterValueOperations.cs" />
+    <Compile Include="Core\PlacementOperations.cs" />
+    <Compile Include="Core\RoomTagOperations.cs" />
+    <Compile Include="Core\ViewGraphicsOperations.cs" />
+    <Compile Include="Core\ProjectParameterOperations.cs" />
+    <Compile Include="Core\RenameOperations.cs" />
+    <Compile Include="Core\RevitCompat.cs" />
+    <Compile Include="Core\RevitIds.cs" />
+    <Compile Include="Core\RevitText.cs" />
+    <Compile Include="Core\SharedParameterOperations.cs" />
+    <Compile Include="Core\SheetLayoutOperations.cs" />
+    <Compile Include="Core\SheetOperations.cs" />
+    <Compile Include="Core\ViewOperations.cs" />
+    <Compile Include="Core\DeviceMarkingOperations.cs" />
+    <Compile Include="Core\LineAssignmentOperations.cs" />
+    <Compile Include="Core\PluginLog.cs" />
+    <Compile Include="Core\ViewSession.cs" />
+    <Compile Include="Core\ZkpsOperations.cs" />
+    <Compile Include="Core\ClashOperations.cs" />
+    <Compile Include="Core\RoomAnalysisOperations.cs" />
+    <Compile Include="Core\BuildingElementOperations.cs" />
+    <Compile Include="Core\DetectorCheckOperations.cs" />
+    <Compile Include="Core\MepSpacingOperations.cs" />
+    <Compile Include="Core\ModelInsightOperations.cs" />
+    <Compile Include="Core\OpsCommon.cs" />
+    <Compile Include="Core\ProjectInfoOperations.cs" />
+    <Compile Include="Core\ElementQueryOperations.cs" />
+    <Compile Include="Core\ElementEditOperations.cs" />
+    <Compile Include="Core\AnnotationOperations.cs" />
+    <Compile Include="Core\CleanupOperations.cs" />
+    <Compile Include="Core\SelectionOperations.cs" />
+    <Compile Include="Core\ColorOperations.cs" />
+    <Compile Include="Core\ScheduleOperations.cs" />
+    <Compile Include="Core\ExportOperations.cs" />
+    <Compile Include="Core\ModelCheckOperations.cs" />
+    <Compile Include="Core\DeviceLineOperations.cs" />
+    <Compile Include="Core\MarkingSettings.cs" />
+    <Compile Include="Core\DetectorPlacementOperations.cs" />
+    <Compile Include="Core\PluginParameterCheck.cs" />
+    <Compile Include="Core\CableJournalOperations.cs" />
+    <Compile Include="Core\CableWalk.cs" />
+    <Compile Include="Core\JournalLevelCheck.cs" />
+    <Compile Include="Core\CableJournal\JournalDialog.cs" />
+    <Compile Include="Core\CableJournal\Services\ExcelExporter.cs" />
+    <Compile Include="Core\CableJournal\Services\TemplateValidator.cs" />
+    <Compile Include="Core\CableJournal\Services\FileDialogService.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportCableJournalByParamCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportApsCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Commands\ExportSouyeCableJournalCommand.cs" />
+    <Compile Include="Core\CableJournal\Filters\CommentsFilter.cs" />
+    <Compile Include="Core\CableJournal\Models\CableRecord.cs" />
+    <Compile Include="Core\CableJournal\Models\DeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Models\ExcelColumnMap.cs" />
+    <Compile Include="Core\CableJournal\Models\SystemType.cs" />
+    <Compile Include="Core\CableJournal\Models\TemplateStructure.cs" />
+    <Compile Include="Core\CableJournal\Monitoring\CancellationMonitor.cs" />
+    <Compile Include="Core\CableJournal\Services\ExecutionLogger.cs" />
+    <Compile Include="Core\CableJournal\Services\GraphConnectivityDiagnostics.cs" />
+    <Compile Include="Core\CableJournal\Services\LoggedRouteLengthCalculator.cs" />
+    <Compile Include="Core\CableJournal\Services\RouteLengthCalculator.Cancellable.cs" />
+    <Compile Include="Core\CableJournal\Services\RouteLengthCalculator.cs" />
+    <Compile Include="Core\CableJournal\Services\TemplateValidationResult.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\ApsElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Aps\Models\ApsDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\Models\SecurityDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Security\SecurityElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\Models\SouyeDeviceInfo.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\Models\SouyeParameterStandard.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeCableRecordBuilder.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeCableSpec.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeDataCollector.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeDataValidator.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeElementParser.cs" />
+    <Compile Include="Core\CableJournal\Systems\Souye\SouyeParameterMapper.cs" />
+    <Compile Include="Mcp\McpArgs.cs" />
+    <Compile Include="Mcp\McpCommandExecutor.cs" />
+    <Compile Include="Mcp\McpEventQueue.cs" />
+    <Compile Include="Mcp\McpHost.cs" />
+    <Compile Include="Mcp\McpLog.cs" />
+    <Compile Include="Mcp\McpProtocol.cs" />
+    <Compile Include="Mcp\McpSocketService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <Compile Include="UserRemoveParameters.xaml.cs">
+      <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="UI\RibbonIcons.cs" />
+    <Compile Include="UI\AddSharedParametersWindow.xaml.cs">
+      <DependentUpon>AddSharedParametersWindow.xaml</DependentUpon>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <None Include="PluginForRevit2022.addin" />
+    <None Include="packages.config" />
+    <Content Include="Resourses\ARBM_ФОП_2026_v1.1_КЖ.txt">
+      <Link>ARBM_ФОП_2026_v1.1_КЖ.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Resourses\" />
+    <Page Include="UI\AddSharedParametersWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="UserRemoveParameters.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resourses\Remove Parameters.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Clear error instead of dozens of "type not found" errors when that Revit is not installed -->
+  <Target Name="CheckRevitApi" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(RevitInstallDir)\RevitAPI.dll')">
+    <Error Text="Revit $(RevitVersion) не найден: нет файла $(RevitInstallDir)\RevitAPI.dll. Установите Revit $(RevitVersion) или выберите другую конфигурацию." />
+  </Target>
+  <!-- Debug: copy the .addin manifest to Addins\<version> and point it at the freshly built DLL -->
+  <Target Name="DeployRevitAddin" AfterTargets="Build" Condition=" '$(IsDebugBuild)' == 'true' ">
+    <MakeDir Directories="$(RevitAddinsDir)" />
+    <Copy SourceFiles="$(ProjectDir)PluginForRevit2022.addin" DestinationFolder="$(RevitAddinsDir)" />
+    <XmlPoke XmlInputPath="$(RevitAddinsDir)\PluginForRevit2022.addin" Query="/RevitAddIns/AddIn/Assembly" Value="$(TargetPath)" />
+    <Message Importance="high" Text="Revit $(RevitVersion) add-in manifest deployed: $(RevitAddinsDir)\PluginForRevit2022.addin" />
+  </Target>
 </Project>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Общий установщик AerBIM Manager для Revit 2021–2024.
+  Надстройка ставится рядом с манифестом в ProgramData (путь в манифесте относительный),
+  поэтому она доступна всем пользователям ПК и не зависит от абсолютных путей.
+  Собирается скриптом build-installer.ps1.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="AerBIM Manager"
+           Manufacturer="AerBIM"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7C1D3B52-9E44-4F0A-8A6B-2D5E7F31C946"
+           Language="1049"
+           Codepage="1251"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Уже установлена более новая версия AerBIM Manager." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Установленные версии Revit: для них компонент включён по умолчанию. -->
+    <?foreach V in 2021;2022;2023;2024?>
+    <Property Id="REVIT$(V)">
+      <DirectorySearch Id="SearchRevit$(V)" Path="[ProgramFiles64Folder]Autodesk\Revit $(V)" Depth="0">
+        <FileSearch Name="Revit.exe" />
+      </DirectorySearch>
+    </Property>
+    <?endforeach?>
+
+    <!-- Каталоги -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="AutodeskData" Name="Autodesk">
+        <Directory Id="RevitData" Name="Revit">
+          <Directory Id="AddinsData" Name="Addins">
+            <?foreach V in 2021;2022;2023;2024?>
+            <Directory Id="ADDINS$(V)" Name="$(V)">
+              <Directory Id="APP$(V)" Name="AerBIM.Manager" />
+            </Directory>
+            <?endforeach?>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="AerBIMFolder" Name="AerBIM">
+        <Directory Id="PRODUCTFOLDER" Name="PluginForRevit">
+          <Directory Id="MCPFOLDER" Name="McpServer" />
+          <Directory Id="TEMPLATEFOLDER" Name="Шаблоны" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Шаблон кабельного журнала: нужен при любой версии Revit -->
+    <ComponentGroup Id="TemplateFiles">
+      <Component Id="JournalTemplate" Directory="TEMPLATEFOLDER">
+        <File Id="JournalTemplateFile" Source="templ_kzh.xlsx" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Файлы надстройки: по компоненту на версию Revit -->
+    <?foreach V in 2021;2022;2023;2024?>
+    <ComponentGroup Id="Files$(V)">
+      <Component Id="Manifest$(V)" Directory="ADDINS$(V)">
+        <File Id="ManifestFile$(V)" Source="AerBIM.Manager.addin" KeyPath="yes" />
+      </Component>
+      <Files Directory="APP$(V)" Include="..\bin\Release R$(V)\*.dll" />
+      <Component Id="Fop$(V)" Directory="APP$(V)">
+        <File Id="FopFile$(V)" Source="..\Resourses\ARBM_ФОП_2026_v1.1_КЖ.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Revit$(V)" Title="Revit $(V)" Description="Надстройка AerBIM Manager для Revit $(V)." Level="1">
+      <Level Value="1000" Condition="NOT REVIT$(V)" />
+      <ComponentGroupRef Id="Files$(V)" />
+      <ComponentGroupRef Id="TemplateFiles" />
+    </Feature>
+    <?endforeach?>
+
+    <!-- MCP-сервер: только для тех, кто работает с ИИ-ассистентом -->
+    <ComponentGroup Id="McpFiles">
+      <Files Directory="MCPFOLDER" Include="..\McpServer\**" />
+      <Component Id="McpExample" Directory="PRODUCTFOLDER">
+        <File Id="McpExampleFile" Source="mcp-config.example.json" KeyPath="yes" />
+      </Component>
+      <Component Id="Notices" Directory="PRODUCTFOLDER">
+        <File Id="NoticesFile" Source="..\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="McpServer" Title="MCP-сервер" Description="Подключение ИИ-ассистента к Revit. Требуется установленный Node.js." Level="1">
+      <ComponentGroupRef Id="McpFiles" />
+    </Feature>
+
+    <!-- Выбор компонентов без страницы лицензии -->
+    <UI>
+      <ui:WixUI Id="WixUI_FeatureTree" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg" Order="999" Condition="NOT Installed" />
+      <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="999" Condition="NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

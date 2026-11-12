@@ -1,0 +1,3687 @@
+{
+  "$comment": "MCP tools of the AerBIM Manager Revit add-in. Each name must match a command registered in Mcp/McpCommandExecutor.cs. inputSchema is JSON Schema; defaults are applied by the server before the call.",
+  "tools": [
+    {
+      "name": "ping",
+      "title": "Check Revit connection",
+      "description": "Checks that the AerBIM Manager add-in in Revit is reachable. Returns Revit version, the active document, the shared parameter file selected in Revit and the list of available commands.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_project_parameters",
+      "title": "List project parameters",
+      "description": "Lists project parameters of the active Revit project (Manage > Project Parameters): id, name, kind (shared/project), GUID, binding (instance/type), properties-palette group and bound categories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nameContains": {
+            "type": "string",
+            "description": "Return only parameters whose name contains this text (case-insensitive)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "remove_project_parameter",
+      "title": "Remove a project parameter",
+      "description": "Removes a project parameter from the active Revit project by id or exact name. All values of this parameter in all elements are lost, and dependent elements may be removed. dryRun defaults to true: it only reports what would be deleted. Show the preview to the user and get explicit confirmation before calling again with dryRun=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Parameter id from list_project_parameters (preferred)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Exact parameter name. If several parameters share it, use id."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = actually delete."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "read_shared_parameter_file",
+      "title": "Read shared parameter file (ФОП)",
+      "description": "Reads a Revit shared parameter file (ФОП): groups and parameters with name, GUID, data type and description. Without filePath reads the file currently selected in Revit. Revit's own setting is restored afterwards.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Full path to the shared parameter .txt file. Omit to use the file selected in Revit."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "Return only parameters whose name contains this text."
+          },
+          "group": {
+            "type": "string",
+            "description": "Return only parameters of this group of the file."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_bindable_categories",
+      "title": "List bindable categories",
+      "description": "Lists categories of the active project that project parameters can be bound to: localized name, BuiltInCategory (OST_*) and category type. Use these names or OST_ ids in add_shared_parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nameContains": {
+            "type": "string",
+            "description": "Return only categories whose name contains this text."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_parameter_groups",
+      "title": "List parameter groups",
+      "description": "Lists properties-palette groups (e.g. data, text, identity_data, constraints) with localized labels. Use key, label or typeId as parameterGroup in add_shared_parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "add_shared_parameters",
+      "title": "Add shared parameters from ФОП",
+      "description": "Adds shared parameters from a shared parameter file (ФОП) to the active document. In a project: binds them to the given categories as instance or type parameters; if a parameter is already bound with the same binding, missing categories are added. Changing instance/type of an existing project parameter is refused because it erases values. In the family editor: adds the parameters to the current family (categories are ignored); allowKindChange switches instance/type of parameters already in the family. dryRun defaults to true: report what would change. Show the preview and get the user's confirmation before calling with dryRun=false. Changes are undoable in Revit (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "parameters"
+        ],
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Parameters from the file: GUID (preferred), exact name, or 'Group/Name' when the name is not unique."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Project only: category names as in Revit or BuiltInCategory ids (OST_Walls). See list_bindable_categories."
+          },
+          "binding": {
+            "type": "string",
+            "enum": [
+              "instance",
+              "type"
+            ],
+            "default": "instance",
+            "description": "Instance (экземпляр) or type (тип) parameter."
+          },
+          "parameterGroup": {
+            "type": "string",
+            "description": "Properties-palette group: key (data), label or typeId. Default: data. See list_parameter_groups."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Full path to the shared parameter file. Omit to use the file selected in Revit."
+          },
+          "allowKindChange": {
+            "type": "boolean",
+            "default": false,
+            "description": "Family editor only: switch instance/type of parameters that already exist in the family."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = apply."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "list_sheets",
+      "title": "List sheets",
+      "description": "Lists sheets of the active project: id, number, name, title block (family : type) and placed views. Optionally returns values of given sheet parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "contains": {
+            "type": "string",
+            "description": "Return only sheets whose number or name contains this text."
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sheet parameter names whose values to return (e.g. ADSK_Штамп Раздел проекта)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_title_blocks",
+      "title": "List title blocks",
+      "description": "Lists title block types (основные надписи) of the active project: id, family, type and the real sheet size in mm, measured by a temporary placement that is rolled back. Also lists format-related parameters (format, multiplicity, width, height) so you can see whether the format is chosen by type or by instance parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "measure": {
+            "type": "boolean",
+            "default": true,
+            "description": "Measure sheet sizes (slower on projects with many title blocks)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_sheets",
+      "title": "Create sheets",
+      "description": "Creates sheets in the active project with a title block, number, name and sheet parameters. Numbers already used in the project or repeated in the list are skipped before anything is created; each sheet is created atomically, so a failed sheet leaves nothing behind. dryRun defaults to true: report what would be created. Get the user's confirmation before calling with dryRun=false. Undoable in Revit (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "titleBlock",
+          "sheets"
+        ],
+        "properties": {
+          "titleBlock": {
+            "type": "string",
+            "description": "Title block: id, 'Family : Type', type name if unique, or 'none'. See list_title_blocks."
+          },
+          "sheets": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Sheets to create.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "number": {
+                  "type": "string",
+                  "description": "Sheet number. Omit for Revit's next number."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Sheet name."
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Sheet parameter values by name, e.g. {\"ADSK_Штамп Раздел проекта\": \"АР\"}. Numbers may include units (\"5 м\")."
+                }
+              }
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = create."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "list_views",
+      "title": "List views",
+      "description": "Lists views of the active project (floor plans by default): id, name, type, level, scale, crop state and size, scope box, view template and the sheet the view is placed on.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "viewType": {
+            "type": "string",
+            "default": "FloorPlan",
+            "description": "Revit ViewType: FloorPlan, CeilingPlan, EngineeringPlan, AreaPlan, Section, Elevation, ThreeD, DraftingView, Legend, or all."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "Return only views whose name contains this text."
+          },
+          "notOnSheet": {
+            "type": "boolean",
+            "default": false,
+            "description": "Return only views not placed on any sheet."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "crop_view",
+      "title": "Crop view (Обрезать вид)",
+      "description": "Sets the crop region of a view (Обрезать вид). Modes: 'model' - bounds of model elements visible in the view (and linked models) plus offset; 'grids' - rectangle through intersections of the given grids plus offset; 'rectangle' - explicit model coordinates in mm; 'scopeBox' - assign a scope box; 'off' - disable cropping. A scope box or non-rectangular crop that blocks the change is removed and reported. Returns the crop size in model mm and on the sheet at the view scale - use it before place_view_on_sheet. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or exact name. See list_views."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "model",
+              "grids",
+              "rectangle",
+              "scopeBox",
+              "off"
+            ],
+            "default": "model",
+            "description": "How to compute the crop region."
+          },
+          "offsetMm": {
+            "type": "number",
+            "default": 1000,
+            "description": "Offset around the found bounds, model mm (model, grids, rectangle)."
+          },
+          "grids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "mode=grids: grid names, e.g. [\"1\", \"8\", \"А\", \"Е\"]."
+          },
+          "rectangleMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "mode=rectangle: [minX, minY, maxX, maxY] in model mm (project internal coordinates)."
+          },
+          "scopeBox": {
+            "type": "string",
+            "description": "mode=scopeBox: scope box name."
+          },
+          "includeLinks": {
+            "type": "boolean",
+            "default": true,
+            "description": "mode=model: include linked Revit models."
+          },
+          "annotationCropOffsetMm": {
+            "type": "number",
+            "description": "Enable annotation crop with this offset (mm on sheet). Omit to leave unchanged."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = apply."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "place_view_on_sheet",
+      "title": "Place view on sheet with fitting format",
+      "description": "Places a view (e.g. a floor plan) on a sheet and picks the sheet format to fit it: the viewport size is measured at the view scale, title block types of one family are measured, and the smallest format whose working area (sheet minus frame margins and the stamp band) fits the view is chosen. Places on an existing sheet (its title block type is changed if fitFormat) or creates a new sheet. The view is centred in the working area. If nothing fits, the largest format is used and a scale is suggested. Crop the view first with crop_view. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or exact name. See list_views."
+          },
+          "sheetId": {
+            "type": "integer",
+            "description": "Existing sheet id. Omit sheetId/sheetNumber to create a new sheet."
+          },
+          "sheetNumber": {
+            "type": "string",
+            "description": "Existing sheet number."
+          },
+          "newSheet": {
+            "type": "object",
+            "description": "New sheet: number, name (default: view name), parameters.",
+            "properties": {
+              "number": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "titleBlockFamily": {
+            "type": "string",
+            "description": "Title block family whose types are the candidate formats. Required when the project has several title block families and no sheet/titleBlock defines it."
+          },
+          "titleBlock": {
+            "type": "string",
+            "description": "Specific title block (id or 'Family : Type'). With fitFormat=false it is used as is."
+          },
+          "fitFormat": {
+            "type": "boolean",
+            "default": true,
+            "description": "Choose the smallest fitting format (changes the title block type of an existing sheet)."
+          },
+          "scale": {
+            "type": "integer",
+            "description": "Set view scale 1:N before placing (ignored if controlled by a view template)."
+          },
+          "marginsMm": {
+            "type": "object",
+            "description": "Frame margins in sheet mm. Default GOST 2.301: left 20, top 5, right 5, bottom 5.",
+            "properties": {
+              "left": {
+                "type": "number"
+              },
+              "top": {
+                "type": "number"
+              },
+              "right": {
+                "type": "number"
+              },
+              "bottom": {
+                "type": "number"
+              }
+            }
+          },
+          "stampHeightMm": {
+            "type": "number",
+            "default": 55,
+            "description": "Height of the stamp band kept free at the bottom (GOST 2.104 form 3: 55 mm). 0 = do not reserve."
+          },
+          "duplicateIfPlaced": {
+            "type": "boolean",
+            "default": false,
+            "description": "If the view is already on a sheet, place a duplicate with detailing."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = apply."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "place_on_sheet",
+      "title": "Place legend, drafting view or schedule on a sheet",
+      "description": "Places a legend, drafting view, schedule (or any other view) on an existing sheet without changing the sheet format. position=auto finds free space inside the frame working area (right column first, top to bottom), keeping clear of placed views, schedules and the stamp (GOST 2.104 form 3, 185x55 mm at bottom-right). Other positions: top-right, top-left, bottom-right (above the stamp), bottom-left, center, or xy (top-left corner in mm from the sheet's bottom-left corner). Legends and schedules may be on several sheets; a drafting view only on one (use duplicateIfPlaced for a copy). Find items with list_views (viewType Legend, DraftingView, Schedule). dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "item"
+        ],
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "Legend / drafting view / schedule: id or exact name."
+          },
+          "sheetId": {
+            "type": "integer",
+            "description": "Target sheet id."
+          },
+          "sheetNumber": {
+            "type": "string",
+            "description": "Target sheet number."
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "top-right",
+              "top-left",
+              "bottom-right",
+              "bottom-left",
+              "center",
+              "xy"
+            ],
+            "default": "auto",
+            "description": "Where to place the item."
+          },
+          "xMm": {
+            "type": "number",
+            "description": "position=xy: left edge, mm from the sheet's left edge."
+          },
+          "yMm": {
+            "type": "number",
+            "description": "position=xy: top edge, mm from the sheet's bottom edge."
+          },
+          "gapMm": {
+            "type": "number",
+            "default": 5,
+            "description": "Minimum gap to other items, sheet mm."
+          },
+          "marginsMm": {
+            "type": "object",
+            "description": "Frame margins in sheet mm. Default GOST 2.301: left 20, top 5, right 5, bottom 5.",
+            "properties": {
+              "left": {
+                "type": "number"
+              },
+              "top": {
+                "type": "number"
+              },
+              "right": {
+                "type": "number"
+              },
+              "bottom": {
+                "type": "number"
+              }
+            }
+          },
+          "stampWidthMm": {
+            "type": "number",
+            "default": 185,
+            "description": "Stamp width at the bottom-right, kept free. 0 = none."
+          },
+          "stampHeightMm": {
+            "type": "number",
+            "default": 55,
+            "description": "Stamp height at the bottom-right, kept free. 0 = none."
+          },
+          "duplicateIfPlaced": {
+            "type": "boolean",
+            "default": false,
+            "description": "Drafting view already on another sheet: place a duplicate with detailing."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = apply."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "rename",
+      "title": "Rename views and sheets",
+      "description": "Renames views (plans, legends, drafting views, schedules...) or sheets (name or number). Either give explicit 'items' with new values, or select elements (ids / viewType / nameContains / numberContains) and apply find/replace, prefix/suffix or a numbering pattern like 'АР-{n:00}' (sheets ordered naturally by current number). All conflicts are checked first: duplicate view names within the same view type, duplicate sheet numbers, forbidden characters; conflicting items are reported and left unchanged. Swaps (A->B, B->A) work. dryRun defaults to true: show the preview and get the user's confirmation before calling with dryRun=false. Undoable (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "views",
+              "sheets"
+            ],
+            "default": "views",
+            "description": "What to rename."
+          },
+          "items": {
+            "type": "array",
+            "description": "Explicit renames. Each item: id or current (view name / sheet number), and newName and/or newNumber (sheets).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "current": {
+                  "type": "string"
+                },
+                "newName": {
+                  "type": "string"
+                },
+                "newNumber": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bulk: element ids to rename."
+          },
+          "viewType": {
+            "type": "string",
+            "description": "Bulk, views: FloorPlan, Legend, DraftingView, Schedule, ..."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "Bulk: only names containing this text."
+          },
+          "numberContains": {
+            "type": "string",
+            "description": "Bulk, sheets: only numbers containing this text."
+          },
+          "field": {
+            "type": "string",
+            "enum": [
+              "name",
+              "number"
+            ],
+            "default": "name",
+            "description": "Bulk, sheets: change name or number."
+          },
+          "find": {
+            "type": "string",
+            "description": "Bulk: text to find (case-sensitive)."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Bulk: replacement text (empty = delete)."
+          },
+          "regex": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat find as a .NET regular expression ($1 in replace)."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Bulk: add prefix (skipped if already present)."
+          },
+          "suffix": {
+            "type": "string",
+            "description": "Bulk: add suffix (skipped if already present)."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Bulk: numbering pattern with {n} or {n:00}, e.g. 'АР-{n:00}'."
+          },
+          "start": {
+            "type": "integer",
+            "default": 1,
+            "description": "Pattern: first n."
+          },
+          "step": {
+            "type": "integer",
+            "default": 1,
+            "description": "Pattern: increment."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "number",
+              "name",
+              "id"
+            ],
+            "default": "number",
+            "description": "Pattern: numbering order (natural sort)."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = apply."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "list_links",
+      "title": "List Revit links",
+      "description": "Lists Revit link instances of the active project: id, instance name, linked document title and whether it is loaded. Use link names in dimension_elements and tag_rooms.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_dimension_types",
+      "title": "List dimension types",
+      "description": "Lists linear dimension types of the active project (names for the dimensionType argument).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "dimension_grids",
+      "title": "Dimension grids",
+      "description": "Creates chain dimensions between grids on a plan: grids are grouped into parallel families; for each family a chain dimension is placed inside the grid ends (side end/start/both) and optionally an overall dimension between the extreme grids. BEFORE calling, ask the designer which links to work with (usually AR, KR, KJ) and pass them in links, or pass hostOnly=true for project grids only; without either the tool creates nothing and returns status=links_required with suggestedLinks. dryRun defaults to true. Provide view or views. The result reports timing: elapsedMs per view, setupMs and totalElapsedMs.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "One plan view (id or name). Use this or views."
+          },
+          "grids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Grid names; empty = all grids in the view."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "end",
+              "start",
+              "both"
+            ],
+            "default": "both",
+            "description": "At which grid ends to place dimensions (end = top/right)."
+          },
+          "offsetMm": {
+            "type": "number",
+            "default": 10,
+            "description": "Distance from the grid ends to the dimension line, sheet mm; the overall line is twice as far."
+          },
+          "overall": {
+            "type": "boolean",
+            "default": true,
+            "description": "Add an overall dimension between the extreme grids."
+          },
+          "dimensionType": {
+            "type": "string",
+            "description": "Linear dimension type name (list_dimension_types). Default: project default."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = create."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Links chosen by the designer (part of the name), usually AR/KR/KJ. Only these links are used; all others are ignored."
+          },
+          "hostOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "The designer confirmed working with the project only, without links."
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Several plan views (ids or names) processed in one run. Only the listed views are used; ask the designer which ones. A failed view does not cancel the others."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "dimension_elements",
+      "title": "Dimension families to each other and to walls",
+      "description": "Creates dimensions on a plan to family instances (sockets, fixtures, equipment...), measured along the view x or y axis using the family centre reference plane. mode=chain: one chain through all elements (walls=ends adds the nearest wall/structure face at both ends). mode=to_walls: for each element a dimension to the nearest wall/structural column face (walls=nearest) or to both sides (walls=both). BEFORE calling with walls, ask the designer which links to work with (usually AR, KR, KJ) and pass them in links, or pass hostOnly=true; without either the tool creates nothing and returns status=links_required with suggestedLinks. Walls are searched only in the project and the chosen links. Select elements explicitly (elements with id and link name) or by categories visible in the view (categories, nameContains; linkElements to take them from the chosen links too). Families rotated off the view axes are skipped. dryRun defaults to true. Provide view or views. The result reports timing: elapsedMs per view, setupMs and totalElapsedMs.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "One plan view (id or name). Use this or views."
+          },
+          "elements": {
+            "type": "array",
+            "description": "Explicit elements: id and, for linked elements, the link name.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "link": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Or: categories to take from the view, OST_* or names (e.g. OST_ElectricalFixtures)."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "Only families/types whose name contains this text."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Links chosen by the designer (part of the name), usually AR/KR/KJ. Only these links are used; all others are ignored."
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "x",
+              "y"
+            ],
+            "default": "x",
+            "description": "Measure horizontally (x) or vertically (y) in the view."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "chain",
+              "to_walls"
+            ],
+            "default": "chain",
+            "description": "Chain through elements, or each element to walls."
+          },
+          "walls": {
+            "type": "string",
+            "enum": [
+              "none",
+              "ends",
+              "nearest",
+              "both"
+            ],
+            "description": "chain: none (default) or ends; to_walls: nearest (default) or both."
+          },
+          "wallCategories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories treated as walls/structure. Default: OST_Walls, OST_StructuralColumns, OST_Columns."
+          },
+          "maxWallDistanceMm": {
+            "type": "number",
+            "default": 20000,
+            "description": "Maximum search distance to a wall, model mm."
+          },
+          "offsetMm": {
+            "type": "number",
+            "default": 8,
+            "description": "Offset of the dimension line from the elements, sheet mm."
+          },
+          "dimensionType": {
+            "type": "string",
+            "description": "Linear dimension type name."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = create."
+          },
+          "hostOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "The designer confirmed working with the project only, without links."
+          },
+          "linkElements": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also take the dimensioned elements from the links in links. Default: project elements only."
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Several plan views (ids or names) processed in one run. Only the listed views are used; ask the designer which ones. A failed view does not cancel the others."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "list_room_tag_types",
+      "title": "List room tag types",
+      "description": "Lists room tag types ('Family : Type') of the active project.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "tag_rooms",
+      "title": "Tag rooms from linked models",
+      "timeoutSeconds": 600,
+      "description": "Places room tags on a plan of the current project for rooms that live in linked models (and optionally in the project itself). Rooms are taken when the plan cut plane passes through the room volume (works when the plan level differs from the architectural level, e.g. above a raised floor), or explicitly by roomLevel, inside the crop region; rooms already tagged in this view are skipped. Tag at the room location point or the room box centre. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "Plan view id or name."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Links with rooms (part of the name). Empty = all loaded links."
+          },
+          "includeHost": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also tag rooms of the current project."
+          },
+          "tagType": {
+            "type": "string",
+            "description": "Room tag type 'Family : Type' (list_room_tag_types). Default: project default."
+          },
+          "skipTagged": {
+            "type": "boolean",
+            "default": true,
+            "description": "Skip rooms already tagged in this view."
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "location",
+              "center"
+            ],
+            "default": "location",
+            "description": "Tag point: room location point or room box centre."
+          },
+          "levelToleranceMm": {
+            "type": "number",
+            "default": 100,
+            "description": "Tolerance around the cut plane when checking room volumes, mm."
+          },
+          "roomLevel": {
+            "type": "string",
+            "description": "Level name in the link to take rooms from (when elevations differ)."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview only (default); false = create."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "list_view_filters",
+      "title": "List view filters",
+      "description": "Lists parameter filters (Фильтры) of the project with categories and the views/templates that use them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_view_templates",
+      "title": "List view templates",
+      "description": "Lists view templates: name, view type, scale, applied filters with visibility, whether the template controls filters, and how many views use it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_filterable_parameters",
+      "title": "List filterable parameters",
+      "description": "Lists parameters usable in a view filter for all given categories (common parameters), with value storage type.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "Only parameters whose name contains this text."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_view_filter",
+      "title": "Create view filter",
+      "description": "Creates (or with overwriteExisting updates) a rule-based view filter for categories. Rules: parameter name, operator (text: equals, not_equals, contains, not_contains, begins_with, ends_with; numbers: equals, not_equals, greater, greater_or_equal, less, less_or_equal - values in display units, e.g. mm; any: has_value, has_no_value), value. logic and/or. Reports how many project elements match. Apply it to a view or template with set_graphics_overrides. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name",
+          "categories"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Filter name."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "rules": {
+            "type": "array",
+            "description": "Rules; empty = all elements of the categories.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parameter": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "logic": {
+            "type": "string",
+            "enum": [
+              "and",
+              "or"
+            ],
+            "default": "and"
+          },
+          "overwriteExisting": {
+            "type": "boolean",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "set_graphics_overrides",
+      "title": "Set graphics overrides (filter or category)",
+      "description": "Overrides graphics in a view or a view template (pass the template name as view) for a filter (added to the view if missing) or a category: line colour/weight/pattern, surface colour/pattern, cut line and cut pattern, transparency, halftone, visibility. Colours as #RRGGBB or 'R,G,B'; patterns by name or 'solid'. Warns when the view's template controls these settings. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View or view template: id or name."
+          },
+          "filter": {
+            "type": "string",
+            "description": "Filter name or id."
+          },
+          "category": {
+            "type": "string",
+            "description": "Or category, OST_* or name."
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "Show/hide the filter or category."
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false,
+            "description": "Start from empty overrides instead of the current ones."
+          },
+          "overrides": {
+            "type": "object",
+            "properties": {
+              "lineColor": {
+                "type": "string"
+              },
+              "lineWeight": {
+                "type": "integer"
+              },
+              "linePattern": {
+                "type": "string"
+              },
+              "surfaceColor": {
+                "type": "string"
+              },
+              "surfacePattern": {
+                "type": "string"
+              },
+              "cutLineColor": {
+                "type": "string"
+              },
+              "cutLineWeight": {
+                "type": "integer"
+              },
+              "cutColor": {
+                "type": "string"
+              },
+              "cutPattern": {
+                "type": "string"
+              },
+              "transparency": {
+                "type": "integer"
+              },
+              "halftone": {
+                "type": "boolean"
+              }
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "remove_view_filter",
+      "title": "Remove filter from view",
+      "description": "Removes a filter from a view or view template (the filter itself stays in the project). dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view",
+          "filter"
+        ],
+        "properties": {
+          "view": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true
+      }
+    },
+    {
+      "name": "apply_view_template",
+      "title": "Apply view template",
+      "description": "Applies a view template to views (explicit names/ids, or selected by viewType/nameContains), or removes the template with template='none'. Incompatible view types are reported and skipped. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "template"
+        ],
+        "properties": {
+          "template": {
+            "type": "string",
+            "description": "Template name or id, or 'none'."
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "View names or ids."
+          },
+          "viewType": {
+            "type": "string",
+            "description": "Or select by view type (FloorPlan, ...)."
+          },
+          "nameContains": {
+            "type": "string",
+            "description": "And/or by name."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "create_view_template",
+      "title": "Create view template from view",
+      "description": "Creates a new view template from an existing view's settings (Создать шаблон из текущего вида). dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view",
+          "name"
+        ],
+        "properties": {
+          "view": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "get_parameter_values",
+      "title": "Read parameter values",
+      "description": "Reads parameter values of elements: select by ids or categories (optionally only those visible in a view, or from a linked model with link), filter with where-conditions (equals, not_equals, contains, not_contains, begins_with, empty, not_empty, greater, less). For each requested parameter returns the value as shown in Revit, storage type, whether it is a type parameter and read-only. Without parameters (or with listParameterNames) returns the available instance and type parameter names per category. At most 300 elements are returned in detail; total is always reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names (e.g. OST_Doors, Листы, Сведения о проекте)."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "link": {
+            "type": "string",
+            "description": "Read elements from this linked model (part of the name)."
+          },
+          "types": {
+            "type": "boolean",
+            "default": false,
+            "description": "Select element types (типоразмеры) instead of instances."
+          },
+          "where": {
+            "type": "array",
+            "description": "Conditions on parameter values (all must match).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parameter": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameter names to read (instance first, then type)."
+          },
+          "listParameterNames": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also return available parameter names."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "set_parameter_values",
+      "title": "Write parameter values",
+      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "view": {
+            "type": "string"
+          },
+          "types": {
+            "type": "boolean",
+            "default": false
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "parameter": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Parameter name -> value for all selected elements."
+          },
+          "items": {
+            "type": "array",
+            "description": "Per-element values.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "allowTypeParameters": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow changing type parameters (affects all instances of the type)."
+          },
+          "maxElements": {
+            "type": "integer",
+            "default": 1000,
+            "description": "Safety limit on the number of elements."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "name": "export_cable_journal",
+      "title": "Export cable journal",
+      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false also needs templatePath and savePath, writes the file and opens it. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running. Cable reserves come from the current settings profile.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "system"
+        ],
+        "properties": {
+          "system": {
+            "type": "string",
+            "enum": [
+              "security",
+              "aps",
+              "souye"
+            ],
+            "description": "security = СОТС (охранная сигнализация), aps = АПС, souye = СОУЭ."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Value of the Comments parameter selecting the elements, e.g. АПС. Required for aps and souye; for security empty = all controllers."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "eom",
+              "adsk"
+            ],
+            "description": "souye only: parameter naming standard. Ask the designer."
+          },
+          "templatePath": {
+            "type": "string",
+            "description": "Excel template path (.xlsx). Required when dryRun=false."
+          },
+          "savePath": {
+            "type": "string",
+            "description": "Output path (.xlsx). Required when dryRun=false."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow replacing an existing output file."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = calculate only (default); false = write the Excel file."
+          }
+        }
+      },
+      "timeoutSeconds": 1860
+    },
+    {
+      "name": "mark_devices",
+      "title": "Mark devices for the cable journal",
+      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. Cable routes are not changed: their floor (ADSK_Этаж, digits) is filled manually. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) using only cable routes of this line: ADSK_Группирование like СПС_АЛС.<controller>.<line> (e.g. СПС_АЛС.1.2 = controller 1, line 2); if no such routes exist, falls back to routes with the same Comments value. Devices are numbered in the order the line cable reaches them (cable assembled from its segments); this needs ADSK_Этаж (digits, filled manually) on every route of the line — otherwise a warning lists the routes without it and the order falls back to minimum cable length over the journal graph. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection. Parameters of another system left from earlier marking are cleared: aps clears ARBM_ПСБ_Адрес устройства; souye clears ARBM_Номер прибора and ARBM_Номер линии; security also clears ARBM_Корпус.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ids",
+          "system",
+          "controller",
+          "line"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device element ids of the line."
+          },
+          "system": {
+            "type": "string",
+            "enum": [
+              "aps",
+              "security",
+              "souye"
+            ],
+            "description": "aps = АПС, security = СОТС, souye = СОУЭ."
+          },
+          "building": {
+            "type": "string",
+            "description": "ARBM_Корпус. Required for aps and souye."
+          },
+          "controller": {
+            "type": "string",
+            "description": "Controller number."
+          },
+          "bco": {
+            "type": "string",
+            "description": "ARBM_ПСБ_БЦО for families without a BCO in the marking settings."
+          },
+          "line": {
+            "type": "string",
+            "description": "Line number."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Comments value used by the journal to select elements. Empty = existing Comments are kept. For order=route it is the fallback route filter when no routes have ADSK_Группирование of this line."
+          },
+          "floor": {
+            "type": "string",
+            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. SOUYE: ARBM_ПСБ_Адрес устройства is written as the loop number only (integer), security as controller.loop."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "adsk",
+              "eom"
+            ],
+            "description": "souye only: which floor parameter to fill."
+          },
+          "startNumber": {
+            "type": "integer",
+            "default": 1,
+            "description": "First device number."
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "route",
+              "snake"
+            ],
+            "default": "manual",
+            "description": "manual = order of ids; route = along the journal's routes; snake = rows across the plan."
+          },
+          "controllerElementId": {
+            "type": "integer",
+            "description": "Controller element id (Electrical Equipment). Required for order=route; recommended always: the tool also writes into the controller what the journal needs (Comments, floor, ARBM_Корпус if empty, ARBM_ПС_Имя изделия: APS building.BCO.number, security ARK.floor.number, SOUYE BCO.number if empty). The controller's number and code come from its own ARBM_SP_ElementMark and ARBM_ПСБ_БЦО (e.g. ARK and 3 → M2.ARK.3); a warning is returned when that number differs from 'controller'. Changes are listed in result.controller.changes."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
+          },
+          "rowMm": {
+            "type": "number",
+            "default": 3000,
+            "description": "Row height for order=snake, mm."
+          }
+        }
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "name": "check_project_parameters",
+      "title": "Check plugin parameters in the project",
+      "description": "Checks that the shared parameters used by the plugin are loaded in the project and bound to the required categories. dryRun=true (default) only reports issues; dryRun=false loads missing parameters from the plugin's shared parameter file and adds missing categories. Parameters with another GUID or a type binding are reported but not changed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = report only (default); false = fix."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_detector_families",
+      "title": "List detector families",
+      "description": "Lists fire alarm device family types in the project that can be placed without a host (for place_detectors).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "place_detectors",
+      "title": "Place detectors in a room",
+      "description": "Places point smoke or heat detectors in one room per SP 484.1311500.2020 with Amendment 1: control radius 6.4 m smoke (rooms up to 12 m), 3.5 m heat (up to 9 m). Builds a grid so every point of the room is covered once or twice, at least wallOffsetMm from walls. Ceiling height comes from ceilings, floors or roofs above each point in the project and links, or from ceilingHeightMm. The designer must check obstacles, beams and ventilation. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "view",
+          "detector",
+          "familyType"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "Plan view id or name; its level hosts the detectors."
+          },
+          "room": {
+            "type": "string",
+            "description": "Room number."
+          },
+          "roomId": {
+            "type": "integer",
+            "description": "Room element id (in the project or in link)."
+          },
+          "link": {
+            "type": "string",
+            "description": "Link containing the room (part of the name). Empty = search the project and all links."
+          },
+          "detector": {
+            "type": "string",
+            "enum": [
+              "smoke",
+              "heat"
+            ]
+          },
+          "familyType": {
+            "type": "string",
+            "description": "'Family : Type' from list_detector_families."
+          },
+          "coverage": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "default": 1,
+            "description": "Detectors controlling each point (SP 484, 6.6.1, 6.6.2). Ask the designer."
+          },
+          "ceilingHeightMm": {
+            "type": "number",
+            "description": "Manual ceiling height above the room floor. Empty = find the ceiling."
+          },
+          "wallOffsetMm": {
+            "type": "number",
+            "default": 500,
+            "description": "Distance from walls, mm."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Links to search for the ceiling (part of the name). Empty = all loaded links."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = place."
+          }
+        }
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "get_marking_settings",
+      "title": "Read marking settings",
+      "description": "Returns the settings profiles, the current profile, BCO per family and which systems (aps, security, souye) a family takes part in.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "set_marking_settings",
+      "title": "Save marking settings",
+      "description": "Saves marking settings for the listed families in the current profile; each listed family is replaced entirely, other families are kept. Only families ticked for a system take part in its lines. Changes a JSON file, not the Revit project.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "families": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Family name."
+                },
+                "bco": {
+                  "type": "string",
+                  "description": "BCO for this family; empty = value from marking."
+                },
+                "aps": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Family takes part in АПС lines."
+                },
+                "security": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Family takes part in СОТС lines."
+                },
+                "souye": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Family takes part in СОУЭ lines."
+                }
+              }
+            }
+          },
+          "apsPercent": {
+            "type": "number",
+            "description": "Cable reserve for APS, %."
+          },
+          "securityPercent": {
+            "type": "number",
+            "description": "Cable reserve for security (СОТС), %."
+          },
+          "souyePercent": {
+            "type": "number",
+            "description": "Cable reserve for SOUYE, %."
+          },
+          "lineReserveM": {
+            "type": "number",
+            "description": "Metres added to every journal row. Each reserve (the three percents and this) changes only when passed; the others keep their profile values."
+          }
+        }
+      }
+    },
+    {
+      "name": "export_marking_account",
+      "title": "Export settings profile",
+      "description": "Saves the current settings profile to a JSON file that can be passed to another user.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path of the JSON file."
+          }
+        }
+      }
+    },
+    {
+      "name": "import_marking_account",
+      "title": "Add settings profile from file",
+      "description": "Adds a settings profile from a JSON file and makes it current. Existing profiles are not changed.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path of the JSON file."
+          }
+        }
+      }
+    },
+    {
+      "name": "select_marking_profile",
+      "title": "Select settings profile",
+      "description": "Makes the named settings profile current.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Profile name from get_marking_settings."
+          }
+        }
+      }
+    },
+    {
+      "name": "add_device_to_line",
+      "title": "Add device to a marked line",
+      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "deviceId"
+        ],
+        "properties": {
+          "afterId": {
+            "type": "integer",
+            "description": "Marked device after which to insert. Omit (with line) to insert at the start of the line."
+          },
+          "deviceId": {
+            "type": "integer",
+            "description": "Device to insert."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
+          },
+          "line": {
+            "type": "string",
+            "description": "Line key from list_marked_lines. Ask the designer which line to work with."
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_devices_from_line",
+      "title": "Remove devices from a marked line",
+      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Model elements, the floor and ARBM_ЗКПС are not changed. dryRun defaults to true. With line, all devices must belong to that line.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device element ids."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = write."
+          },
+          "line": {
+            "type": "string",
+            "description": "Line key from list_marked_lines. Ask the designer which line to work with."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_marked_lines",
+      "title": "List marked lines",
+      "description": "Lists marked lines in the project: system, building, controller, line number, device count and capacity. Use it to ask the designer which line to work with.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "assign_devices_to_lines",
+      "timeoutSeconds": 300,
+      "title": "Assign APS devices to lines by routes",
+      "description": "Read-only. Splits APS devices (Data Devices and Fire Alarm Devices of families ticked for АПС in the marking settings) into lines by cable routes: a route's line comes from ADSK_Группирование like СПС_АЛС.<controller>.<line>; a device belongs to the line whose route on the same level passes nearest, within maxDistanceMm (plan distance). For each line returns the ARK controller (ARK controllers are found by ARBM_ПСБ_БЦО containing ARK and the number in ARBM_SP_ElementMark), route count, device ids, families and the devices' current marking; also unassigned devices and devices near several lines. Use the result to call mark_devices per line with order=route, controllerElementId and the line's deviceIds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxDistanceMm": {
+            "type": "number",
+            "default": 500,
+            "description": "Max plan distance from a device to its line's route, mm."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "check_journal_levels",
+      "title": "Check levels for the cable journal",
+      "timeoutSeconds": 300,
+      "description": "Read-only. Per line (cable routes by ADSK_Группирование …АЛС.<controller>.<line>, devices by ARBM_Номер прибора/ARBM_Номер линии) checks levels the way the APS cable journal determines them: cable routes without a level (journal puts them into a common '-1' graph), routes whose journal level differs from the level at their height, devices whose journal level differs from the level of the route they sit on (journal cannot find a path and silently bridges), devices not near any route of their line, and empty ADSK_Этаж on routes and devices. Returns element ids per line.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attachMm": {
+            "type": "number",
+            "default": 600,
+            "description": "Max plan distance from a device to its line's route, mm."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "assign_zkps",
+      "title": "Fill ARBM_ЗКПС from zones on plans",
+      "timeoutSeconds": 300,
+      "description": "Fills ARBM_ЗКПС of APS devices (families ticked for АПС in the marking settings) from fire alarm control zones drawn on plans as detail groups whose name contains 'ЗК' (e.g. 'ЗКСПС_3_этаж'): the group's lines are zone boundaries, its text notes like 'ЗКСПС_3.21' are zone labels. Boundaries are rasterized (cellMm), each label's area is flood-filled; devices on the group view's level inside a zone get the label's number as written (ЗКСПС_3.21 → 3.21). Zones whose boundary is not closed are reported and skipped (devices inside keep their value). On levels that have a zone group, devices outside all zones get their old ARBM_ЗКПС cleared; group views without a level (sections, 3D, drafting) are skipped. The APS journal shows it as M2.8.BTH.1.27(3.21). dryRun defaults to true: get the user's confirmation before dryRun=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "groupContains": {
+            "type": "string",
+            "description": "Part of the detail group name, default 'ЗК'."
+          },
+          "cellMm": {
+            "type": "number",
+            "default": 150,
+            "description": "Grid cell, mm; gaps in boundaries up to ~1.5 cells are closed."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true
+          },
+          "commentsContains": {
+            "type": "string",
+            "description": "Only devices whose Comments contain this text (e.g. 'АПС'), any category except Electrical Equipment and cable routes (Mechanical Equipment). Empty = families ticked for АПС in the marking settings."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_selected_elements",
+      "title": "Get selected elements",
+      "description": "Returns the elements currently selected in Revit: id, category, family, type, level and plan position (mm).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "show_elements",
+      "title": "Show elements",
+      "description": "Shows elements to the designer in the active view: select, zoom (select and zoom to them), isolate or hide temporarily, or reset temporary hiding. Does not change the model.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids (not needed for reset)."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "select",
+              "zoom",
+              "isolate",
+              "hide",
+              "reset"
+            ],
+            "default": "zoom"
+          }
+        }
+      }
+    },
+    {
+      "name": "color_by_parameter",
+      "title": "Color elements by parameter",
+      "description": "Colors elements of the given categories in a view by the value of a parameter (one colour per value, grey for empty) using element graphic overrides, and returns the legend. Useful to check marking lines (e.g. ARBM_Номер линии). reset=true clears the overrides. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "parameter": {
+            "type": "string",
+            "description": "Parameter name (instance, then type)."
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_schedules",
+      "title": "List schedules",
+      "description": "Lists schedules in the project with category and field count.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_schedule_data",
+      "title": "Read schedule",
+      "description": "Reads the body of a schedule as rows of cell text (up to 500 rows).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "schedule"
+        ],
+        "properties": {
+          "schedule": {
+            "type": "string",
+            "description": "Schedule id or name (list_schedules)."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "export_schedule",
+      "title": "Export schedule",
+      "description": "Saves a schedule to a CSV file (semicolon separated).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "schedule",
+          "folder"
+        ],
+        "properties": {
+          "schedule": {
+            "type": "string",
+            "description": "Schedule id or name (list_schedules)."
+          },
+          "folder": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string",
+            "description": "Default: schedule name."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_schedule",
+      "title": "Create schedule",
+      "description": "Creates a schedule of a category with the given fields (field names as in Revit) and optional sorting. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "category",
+          "fields"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "OST_* or category name."
+          },
+          "name": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sortBy": {
+            "type": "string",
+            "description": "One of fields."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "export_sheets",
+      "title": "Export sheets",
+      "description": "Exports sheets to PDF (Revit 2022+) or DWG, one file per sheet named 'number - name', or one combined PDF. dryRun defaults to true and only lists the files.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sheets",
+          "format",
+          "folder"
+        ],
+        "properties": {
+          "sheets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sheet numbers, or [\"*\"] for all."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "dwg"
+            ]
+          },
+          "folder": {
+            "type": "string"
+          },
+          "dwgSetup": {
+            "type": "string",
+            "description": "Named DWG export setup. Empty = default options."
+          },
+          "combine": {
+            "type": "boolean",
+            "default": false,
+            "description": "PDF: one combined file."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "find_untagged_elements",
+      "title": "Find untagged elements",
+      "description": "Finds elements of the given categories in a view that have no tag in that view.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "find_undimensioned_elements",
+      "title": "Find undimensioned elements",
+      "description": "Finds elements of the given categories in a view that no dimension in that view references.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "categories"
+        ],
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_warnings",
+      "title": "Get model warnings",
+      "description": "Returns Revit warnings grouped by text with counts and element ids.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "wipe_empty_tags",
+      "title": "Remove empty tags",
+      "description": "Finds tags with empty text in a view (or the whole project when view is empty) and deletes them when dryRun=false.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = whole project."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_project_info",
+      "title": "Project info",
+      "description": "Project information: title, file, size, project parameters (name, number, client, status...), levels with elevations, phases, links, active view.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_current_view_info",
+      "title": "Active view info",
+      "description": "Active view: name, type, scale, detail level, level, template, crop, phase and sheets it is placed on.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_worksets",
+      "title": "Worksets",
+      "description": "User worksets with open/editable state, owner, active flag and element counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_phases",
+      "title": "Phases",
+      "description": "Project phases and phase filters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "analyze_model_statistics",
+      "title": "Model statistics",
+      "timeoutSeconds": 600,
+      "description": "Element counts by category and level, families, types, views, sheets, schedules, links, CAD imports, groups, warnings, file size.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "check_model_health",
+      "title": "Model health",
+      "timeoutSeconds": 600,
+      "description": "Conditional health score 0-100 and grade A-F from warnings, unused types, CAD imports, in-place families, views off sheets and file size, with recommendations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "manage_links",
+      "title": "Manage Revit links",
+      "description": "Lists Revit links (loaded state, path, instances) or reloads/unloads links by name part. Reload/unload cannot be undone with Ctrl+Z. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "reload",
+              "unload"
+            ],
+            "default": "list"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link name parts."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "filter_elements",
+      "title": "Filter elements",
+      "description": "Finds project elements by categories, family/type name parts, level, view visibility and/or a region (minMm/maxMm). Returns counts and up to 500 elements. For parameter conditions use get_parameter_values.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "familyContains": {
+            "type": "string"
+          },
+          "typeContains": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "minMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Region corner [x, y, z] in mm (project internal coordinates)."
+          },
+          "maxMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Opposite region corner [x, y, z] in mm."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_elements_in_spatial_volume",
+      "title": "Elements in a region",
+      "description": "Finds elements whose bounding box intersects the region minMm-maxMm (mm), optionally filtered by categories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "familyContains": {
+            "type": "string"
+          },
+          "typeContains": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "minMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Region corner [x, y, z] in mm (project internal coordinates)."
+          },
+          "maxMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Opposite region corner [x, y, z] in mm."
+          }
+        },
+        "required": [
+          "minMm",
+          "maxMm"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "measure_between_elements",
+      "title": "Measure between elements",
+      "description": "Distance between two elements: between insertion points (or box centres) with dx/dy/dz, and the gap between bounding boxes, in mm.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "firstId": {
+            "type": "integer"
+          },
+          "secondId": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "firstId",
+          "secondId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "clash_detection",
+      "title": "Clash detection",
+      "description": "Finds solid intersections between plugin elements in the project (group A, default: cable trays and tray fittings, conduits and fittings, fire alarm, data, nurse call, communication, security, electrical and lighting devices) and obstacles in the project and Revit links (group B, default: structural framing and columns, columns, walls, floors, ducts, pipes and their fittings). Connected run segments and the family host are not reported; intersections smaller than minVolumeCm3 are ignored. Read-only. Cable journal route families (ARBM_Кабель*, ARBM_Межэтажный переход) never take part.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categoriesA": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group A categories (project only). Default: plugin categories."
+          },
+          "categoriesB": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group B categories (project and links). Default: structures and other MEP."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only group A elements visible in this view."
+          },
+          "includeLinks": {
+            "type": "boolean",
+            "default": true
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link name parts for group B. Empty = all loaded links."
+          },
+          "minVolumeCm3": {
+            "type": "number",
+            "default": 50,
+            "description": "Smallest intersection volume to report, cm³."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 300
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "export_elements_data",
+      "title": "Export elements to CSV",
+      "description": "Writes elements (id, category, family, type, level and the requested parameters) to a semicolon-separated UTF-8 CSV file that opens in Excel. Filters as in filter_elements.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "familyContains": {
+            "type": "string"
+          },
+          "typeContains": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "minMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Region corner [x, y, z] in mm (project internal coordinates)."
+          },
+          "maxMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Opposite region corner [x, y, z] in mm."
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameter names (instance, then type)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Output .csv file."
+          }
+        },
+        "required": [
+          "categories",
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "get_materials",
+      "title": "List materials",
+      "description": "Lists materials, optionally by name part or material class.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nameContains": {
+            "type": "string"
+          },
+          "materialClass": {
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_material_properties",
+      "title": "Material properties",
+      "description": "Material class, colour, transparency, shininess, smoothness, appearance/structural/thermal asset names and density (kg/m³) when a structural asset exists.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "material": {
+            "type": "string",
+            "description": "Material id or name."
+          }
+        },
+        "required": [
+          "material"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_material_quantities",
+      "title": "Material quantities",
+      "timeoutSeconds": 600,
+      "description": "Sums material area (m²) and volume (m³) of the selected elements by material, with element counts. Useful as input for calculations such as SOUYE acoustics.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "familyContains": {
+            "type": "string"
+          },
+          "typeContains": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name."
+          },
+          "view": {
+            "type": "string",
+            "description": "Only elements visible in this view (id or name)."
+          },
+          "minMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Region corner [x, y, z] in mm (project internal coordinates)."
+          },
+          "maxMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Opposite region corner [x, y, z] in mm."
+          }
+        },
+        "required": [
+          "categories"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "delete_elements",
+      "title": "Delete elements",
+      "description": "Deletes elements by id. Preview reports how many dependent elements Revit would delete as well. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      }
+    },
+    {
+      "name": "change_element_type",
+      "title": "Change element type",
+      "description": "Swaps the type of elements (ids, or all elements of a category with fromType) to toType ('Family : Type'). dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "category": {
+            "type": "string"
+          },
+          "fromType": {
+            "type": "string"
+          },
+          "toType": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "toType"
+        ]
+      }
+    },
+    {
+      "name": "modify_elements",
+      "title": "Move, copy, rotate or mirror",
+      "description": "move/copy by dxMm, dyMm, dzMm; rotate by angle (degrees) about a vertical axis through the selection centre; mirror about the x or y axis through the centre. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "move",
+              "copy",
+              "rotate",
+              "mirror"
+            ]
+          },
+          "dxMm": {
+            "type": "number"
+          },
+          "dyMm": {
+            "type": "number"
+          },
+          "dzMm": {
+            "type": "number"
+          },
+          "angle": {
+            "type": "number"
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "x",
+              "y"
+            ]
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "copy_elements",
+      "title": "Copy elements to views",
+      "timeoutSeconds": 120,
+      "description": "Copies view elements (annotations, details, tags) from one view to other views in place. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "fromView": {
+            "type": "string"
+          },
+          "toViews": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids",
+          "fromView",
+          "toViews"
+        ]
+      }
+    },
+    {
+      "name": "match_element_properties",
+      "title": "Match properties",
+      "description": "Copies parameter values from a source element to targets: the listed parameters, or all user (shared/project) instance parameters. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceId": {
+            "type": "integer"
+          },
+          "targetIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Target element ids."
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "sourceId",
+          "targetIds"
+        ]
+      }
+    },
+    {
+      "name": "set_element_phase",
+      "title": "Set element phase",
+      "description": "Sets the phase created and/or demolished ('none' clears demolished). dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "created": {
+            "type": "string"
+          },
+          "demolished": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      }
+    },
+    {
+      "name": "set_element_workset",
+      "title": "Set element workset",
+      "description": "Moves elements to a user workset. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "workset": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids",
+          "workset"
+        ]
+      }
+    },
+    {
+      "name": "load_family",
+      "title": "Load family",
+      "description": "Loads a family (.rfa) into the project; an already loaded family with the same name is not overwritten. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "override_graphics",
+      "title": "Override element graphics",
+      "description": "Per-element graphic overrides in a view: colour 'R,G,B' (lines and solid surface), line weight 1-16, transparency 0-100, halftone; reset=true clears them. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "color": {
+            "type": "string"
+          },
+          "lineWeight": {
+            "type": "integer"
+          },
+          "transparency": {
+            "type": "integer"
+          },
+          "halftone": {
+            "type": "boolean"
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      }
+    },
+    {
+      "name": "create_text_note",
+      "title": "Create text note",
+      "description": "Places a text note in a view at xMm, yMm (project coordinates). Default text type unless type is given. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "xMm": {
+            "type": "number"
+          },
+          "yMm": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "Text note type name."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "xMm",
+          "yMm",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "create_filled_region",
+      "title": "Create filled region",
+      "description": "Creates a filled region in a view from a closed outline of points [x1, y1, x2, y2, ...] in mm. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "pointsMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "type": {
+            "type": "string",
+            "description": "Filled region type name."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "pointsMm"
+        ]
+      }
+    },
+    {
+      "name": "manage_revisions",
+      "title": "Manage revisions",
+      "description": "list revisions; create a revision (description, date, issuedBy, issuedTo); assign a revision (id, sequence or description) to sheets by number. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "create",
+              "assign"
+            ],
+            "default": "list"
+          },
+          "description": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "issuedBy": {
+            "type": "string"
+          },
+          "issuedTo": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "tag_equipment",
+      "title": "Tag equipment",
+      "timeoutSeconds": 600,
+      "description": "Tags equipment in a view that has no tag yet. Default categories: the plugin's devices (fire alarm, data, nurse call, communication, security, electrical equipment and fixtures, lighting devices, telephone). Uses the category's default tag type unless tagType is given; categories without a loaded tag family are reported. dryRun defaults to true: the preview only counts untagged elements per category and checks that a tag family is loaded (fast, nothing is created); the write creates all tags in one transaction and hides Revit warnings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "tagType": {
+            "type": "string",
+            "description": "'Family : Type' of the tag."
+          },
+          "offsetMm": {
+            "type": "number",
+            "default": 300,
+            "description": "Tag offset above the element, model mm."
+          },
+          "leader": {
+            "type": "boolean",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "batch_rename",
+      "title": "Batch rename",
+      "description": "Renames levels, grids, family types (by categories) or rooms: find/replace, prefix, suffix, optionally only names containing a text. Rejects duplicate names. Views and sheets: use rename. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "levels",
+              "grids",
+              "types",
+              "rooms"
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "contains": {
+            "type": "string"
+          },
+          "find": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "suffix": {
+            "type": "string"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        },
+        "required": [
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "cad_link_cleanup",
+      "title": "CAD imports and links",
+      "description": "Lists CAD imports and links (linked or imported, view-specific, pinned) or deletes them: given ids, or scope imports/links/all. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "delete"
+            ],
+            "default": "list"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "imports",
+              "links",
+              "all"
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Element ids."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "purge_unused",
+      "title": "Purge unused",
+      "timeoutSeconds": 600,
+      "description": "Deletes unused items: family types without instances (optionally only in categories), view templates not used by any view, filters not applied to any view. Items Revit refuses to delete are skipped. dryRun defaults to true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "types",
+                "viewTemplates",
+                "filters"
+              ]
+            },
+            "description": "Default: types."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Categories, OST_* or names."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_rooms",
+      "title": "Rooms with geometry",
+      "description": "Rooms of the project and/or links (with link transform): number, name, department, level, area m², perimeter m, height mm, volume m³ (Revit volume, or area × height when volume calculation is off) and centre. includeBoundary adds outlines in mm.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "host",
+              "links",
+              "all"
+            ],
+            "default": "all",
+            "description": "Rooms of the project, of links, or both."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link name parts. Empty = all loaded links."
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name part."
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room numbers."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room element ids (in their own model)."
+          },
+          "includeBoundary": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_room_surface_areas",
+      "title": "Room surface areas",
+      "timeoutSeconds": 600,
+      "description": "Floor, ceiling and wall areas (m²) of rooms from their geometry at the finish boundary, with door and window openings subtracted from their host walls, and a per-wall breakdown. Input for acoustic calculations (e.g. SOUYE reverberation). Up to 200 rooms per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "host",
+              "links",
+              "all"
+            ],
+            "default": "all",
+            "description": "Rooms of the project, of links, or both."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link name parts. Empty = all loaded links."
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name part."
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room numbers."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room element ids (in their own model)."
+          },
+          "subtractOpenings": {
+            "type": "boolean",
+            "default": true
+          },
+          "includeBreakdown": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_room_openings",
+      "title": "Doors and windows by room",
+      "description": "Counts doors and windows of each room (an opening counts for both rooms it connects) with optional details: size, host wall, position, from/to room.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "host",
+              "links",
+              "all"
+            ],
+            "default": "all",
+            "description": "Rooms of the project, of links, or both."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link name parts. Empty = all loaded links."
+          },
+          "level": {
+            "type": "string",
+            "description": "Level name part."
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room numbers."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Room element ids (in their own model)."
+          },
+          "includeDetails": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_spaces",
+      "title": "MEP spaces",
+      "description": "MEP spaces: number, name, level, placed state, area, volume, bounded height (volume/area) and a verified point inside the space.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_doors_windows",
+      "title": "Doors and windows",
+      "description": "All doors and/or windows with width and height (mm), mark, level, insertion point (mm, project coordinates), host wall, facing direction and from/to rooms; optionally from links.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "all",
+              "doors",
+              "windows"
+            ],
+            "default": "all"
+          },
+          "level": {
+            "type": "string"
+          },
+          "includeLinks": {
+            "type": "boolean",
+            "default": false
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxCount": {
+            "type": "integer",
+            "default": 1000
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_wall_info",
+      "title": "Wall info",
+      "description": "Walls by id (in the project or in a link): type, function, thickness, length, height (mm), base level, structural flag, location line start/end (mm, project coordinates).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "link": {
+            "type": "string",
+            "description": "Link name part when the ids are in a link."
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "find_walls_near_point",
+      "title": "Walls near a point",
+      "description": "Walls (project and links) whose location line is within radiusMm of a plan point, nearest first, with the plan distance.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "xMm": {
+            "type": "number"
+          },
+          "yMm": {
+            "type": "number"
+          },
+          "radiusMm": {
+            "type": "number",
+            "default": 1000
+          },
+          "level": {
+            "type": "string"
+          },
+          "includeLinks": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "xMm",
+          "yMm"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "check_detectors",
+      "title": "Check placed detectors",
+      "description": "Read-only analysis of placed point smoke/heat detectors in a view per SP 484 with Amendment 1: distance to walls (6.6.36), to ventilation terminals in the project and links (6.6.32), room coverage by control zones and room height limits (6.6.15-6.6.16). Detector type is recognised by family/type name keywords. Not checked: beams, distance to the ceiling (6.6.12), sloped ceilings, raised floors. Placement itself is done by place_detectors.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          },
+          "smokeKeywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "heatKeywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "coverage": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "default": 1,
+            "description": "Detectors controlling each point."
+          },
+          "checkVents": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 600
+    },
+    {
+      "name": "check_mep_spacing",
+      "title": "Check MEP spacing",
+      "description": "Finds straight runs of cable trays, conduits, pipes and ducts (project and links) whose outer clearance is less than clearanceMm or that clash. clearanceMm is required: ask the designer, never assume a value. Rectangular sections are treated by their circumscribed circle, so trays are checked conservatively.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "clearanceMm": {
+            "type": "number"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "cable_trays",
+                "conduits",
+                "pipes",
+                "ducts"
+              ]
+            }
+          },
+          "includeLinks": {
+            "type": "boolean",
+            "default": true
+          },
+          "includeInsulation": {
+            "type": "boolean",
+            "default": true
+          },
+          "minMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Optional region corner [x,y,z] mm."
+          },
+          "maxMm": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "maxResults": {
+            "type": "integer",
+            "default": 300
+          }
+        },
+        "required": [
+          "clearanceMm"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 900
+    },
+    {
+      "name": "get_field_values",
+      "title": "Parameter value distribution",
+      "description": "How a parameter is filled for a category: distinct values with counts, empty values and elements without the parameter. Works in the project, in a link, or for elements visible in a view.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "categories",
+          "parameter"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_view_extents",
+      "title": "View extents and visibility",
+      "description": "View type, scale, detail level, display style, template, scope box, crop and annotation crop (mm), plan view range with cut plane, 3D section box, hidden categories, link visibility, temporary hide/isolate and counts of view-specific annotations. Useful when equipment is not visible.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View id or name. Empty = active view."
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ]
+}

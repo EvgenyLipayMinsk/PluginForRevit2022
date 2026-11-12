@@ -5,16 +5,44 @@ VisualStudioVersion = 17.6.33815.320
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PluginForRevit2022", "PluginForRevit2022.csproj", "{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}"
 EndProject
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "SetupProject", "SetupProject\SetupProject.vdproj", "{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Release|Any CPU = Release|Any CPU
+		Debug R2021|Any CPU = Debug R2021|Any CPU
+		Release R2021|Any CPU = Release R2021|Any CPU
+		Debug R2022|Any CPU = Debug R2022|Any CPU
+		Debug R2023|Any CPU = Debug R2023|Any CPU
+		Debug R2024|Any CPU = Debug R2024|Any CPU
+		Release R2022|Any CPU = Release R2022|Any CPU
+		Release R2023|Any CPU = Release R2023|Any CPU
+		Release R2024|Any CPU = Release R2024|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2021|Any CPU.ActiveCfg = Debug R2021|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2021|Any CPU.Build.0 = Debug R2021|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2021|Any CPU.ActiveCfg = Release R2021|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2021|Any CPU.Build.0 = Release R2021|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2022|Any CPU.ActiveCfg = Debug R2022|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2022|Any CPU.Build.0 = Debug R2022|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2023|Any CPU.ActiveCfg = Debug R2023|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2023|Any CPU.Build.0 = Debug R2023|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2024|Any CPU.ActiveCfg = Debug R2024|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Debug R2024|Any CPU.Build.0 = Debug R2024|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2022|Any CPU.ActiveCfg = Release R2022|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2022|Any CPU.Build.0 = Release R2022|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2023|Any CPU.ActiveCfg = Release R2023|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2023|Any CPU.Build.0 = Release R2023|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2024|Any CPU.ActiveCfg = Release R2024|Any CPU
+		{95E98489-DDEB-4FFA-AC8C-B921AEF66EE5}.Release R2024|Any CPU.Build.0 = Release R2024|Any CPU
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Debug R2021|Any CPU.ActiveCfg = Debug
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Release R2021|Any CPU.ActiveCfg = Release
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Debug R2022|Any CPU.ActiveCfg = Debug
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Debug R2023|Any CPU.ActiveCfg = Debug
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Debug R2024|Any CPU.ActiveCfg = Debug
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Release R2022|Any CPU.ActiveCfg = Release
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Release R2023|Any CPU.ActiveCfg = Release
+		{D402B7FB-CF4B-4D3E-8B28-4711CD518DA0}.Release R2024|Any CPU.ActiveCfg = Release
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

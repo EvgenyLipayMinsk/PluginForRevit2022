@@ -103,12 +103,14 @@ namespace PluginForRevit2022.Mcp
             }
 
             bool on = IsRunning;
-            _toggleButton.ItemText = on ? "MCP\rвкл" : "MCP\rвыкл";
+            _toggleButton.ItemText = on ? "MCP вкл" : "MCP выкл"; // мелкая кнопка в стопке — в одну строку
             _toggleButton.ToolTip = on
                 ? $"MCP-соединение включено (localhost:{Port}). Нажмите, чтобы выключить."
                 : $"MCP-соединение выключено. Нажмите, чтобы ИИ-клиент мог подключиться к Revit через localhost:{Port}.";
-            _toggleButton.LargeImage = CreateIndicator(on ? Color.FromRgb(46, 160, 67) : Color.FromRgb(140, 140, 140), 32);
-            _toggleButton.Image = CreateIndicator(on ? Color.FromRgb(46, 160, 67) : Color.FromRgb(140, 140, 140), 16);
+            // Значок вилки: зелёная — включено, серая — выключено
+            Color state = on ? UI.RibbonIcons.On : UI.RibbonIcons.Off;
+            _toggleButton.LargeImage = UI.RibbonIcons.Large("plug", state);
+            _toggleButton.Image = UI.RibbonIcons.Small("plug", state);
         }
 
         /// <summary>Иконка-индикатор: цветной круг с коротким текстом (по умолчанию MCP).</summary>

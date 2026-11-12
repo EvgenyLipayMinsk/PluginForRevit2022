@@ -233,6 +233,7 @@
     <Compile Include="UserRemoveParameters.xaml.cs">
       <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
     </Compile>
+    <Compile Include="UI\RibbonIcons.cs" />
     <Compile Include="UI\AddSharedParametersWindow.xaml.cs">
       <DependentUpon>AddSharedParametersWindow.xaml</DependentUpon>
     </Compile>

@@ -32,6 +32,7 @@ namespace PluginForRevit2022.UI
             ["log"] = ("M4 4 H20 V8 H4 Z M5 8 V20 H19 V8", "M10 12 H14"),
             ["plug"] = ("M9 3 V8 M15 3 V8 M12 17 V21", "M6 8 H18 V11 A6 6 0 0 1 6 11 Z"),
             ["reset"] = ("M20 12 A8 8 0 1 1 17 5.8", "M20 3 V8 H15"),
+            ["clash"] = ("M3 9 H14 V20 H3 Z M10 4 H21 V15 H10 Z", "M10 9 H14 V15 H10 Z"),
         };
 
         /// <summary>Крупный значок 32×32.</summary>

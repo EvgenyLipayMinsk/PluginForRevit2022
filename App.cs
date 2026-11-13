@@ -19,6 +19,9 @@ namespace PluginForRevit2022
             Core.PluginLog.Info("revit.startup", $"{application.ControlledApplication.VersionName} {application.ControlledApplication.VersionBuild} | плагин " +
                 System.Reflection.Assembly.GetExecutingAssembly().GetName().Version + " | " + System.Environment.MachineName);
 
+            // Журнал замены ID лотков при соединении/разделении — для поиска коллизий Navisworks по старым ID
+            Core.Clashes.ElementIdJournal.Start(application.ControlledApplication);
+
             // Лента в стиле Revit: линейные значки, главные команды — крупные, второстепенные — мелкие стопкой
             string tabName = "AerBIM Manager";
             application.CreateRibbonTab(tabName);
@@ -82,6 +85,14 @@ namespace PluginForRevit2022
             var placementPanel = application.CreateRibbonPanel(tabName, "Размещение оборудования");
             placementPanel.AddItem(Button("Извещатели", "Извещатели", "GuardPlaceDetectors", "detector",
                 "Разместить дымовые или тепловые извещатели в помещении кликом на плане (СП 484 с Изменением № 1)."));
+            #endregion
+
+            #region Коллизии
+            var clashPanel = application.CreateRibbonPanel(tabName, "Коллизии");
+            clashPanel.AddItem(Button("Коллизии Navisworks", "Navisworks", "CmdClashNavigator", "clash",
+                "Отчёт о коллизиях Navisworks (HTML или XML): переход по коллизиям с показом в модели, статусы и выгрузка в Excel.",
+                "Статусы: в работе, передано смежному разделу, фиктивная (с комментарием), исправлено. Они сохраняются рядом с отчётом, коллеги видят их при открытии того же отчёта. " +
+                "В Excel исправленные коллизии уходят на отдельный лист."));
             #endregion
 
             #region Поддержка

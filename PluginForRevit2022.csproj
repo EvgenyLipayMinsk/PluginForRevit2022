@@ -234,6 +234,13 @@
       <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
     </Compile>
     <Compile Include="UI\RibbonIcons.cs" />
+    <Compile Include="UI\ClashNavigatorWindow.cs" />
+    <Compile Include="CmdClashes.cs" />
+    <Compile Include="Core\Clashes\NavisReport.cs" />
+    <Compile Include="Core\Clashes\ClashStatusStore.cs" />
+    <Compile Include="Core\Clashes\ClashExcel.cs" />
+    <Compile Include="Core\Clashes\ElementIdJournal.cs" />
+    <Compile Include="Core\Clashes\ClashRevit.cs" />
     <Compile Include="UI\AddSharedParametersWindow.xaml.cs">
       <DependentUpon>AddSharedParametersWindow.xaml</DependentUpon>
     </Compile>

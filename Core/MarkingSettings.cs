@@ -287,6 +287,21 @@ namespace PluginForRevit2022.Core
                 .ToList();
         }
 
+        /// <summary>Семейства устройств слаботочных категорий, которые маркировка не берёт (с категорией в скобках).</summary>
+        public static List<string> OtherCategoryFamilies(Document doc)
+        {
+            var categories = new List<BuiltInCategory>
+            {
+                BuiltInCategory.OST_SecurityDevices, BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_TelephoneDevices,
+                BuiltInCategory.OST_LightingDevices, BuiltInCategory.OST_ElectricalFixtures,
+            };
+            return new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol))
+                .WherePasses(new ElementMulticategoryFilter(categories)).Cast<FamilySymbol>()
+                .Select(s => $"{s.FamilyName} ({s.Category?.Name})")
+                .Distinct(StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+
         public static Dictionary<string, object> ToResult(Document doc) => new Dictionary<string, object>
         {
             ["profile"] = Current().Name,

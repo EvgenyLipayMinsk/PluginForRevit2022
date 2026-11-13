@@ -47,6 +47,17 @@ namespace PluginForRevit2022.Core
         internal const string ParamGrouping = "ADSK_Группирование";
         internal const int LineCapacity = 250;
 
+        /// <summary>«Комментарии» устройства АПС. Без него устройство не входит в линию АПС (так же отбирает кабельный журнал),
+        /// даже если номера прибора и линии заполнены — например, модуль, размеченный вручную.</summary>
+        internal const string ApsComment = "АПС";
+
+        public static bool HasApsComment(Element e) => HasComment(e, ApsComment);
+
+        /// <summary>«Комментарии» элемента равны заданному (без учёта регистра и пробелов по краям).</summary>
+        public static bool HasComment(Element e, string comment) =>
+            string.Equals(e.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim(), (comment ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+
         public static Dictionary<string, object> Mark(Document doc, MarkDevicesRequest request)
         {
             string system = (request.System ?? "").Trim().ToLowerInvariant();
@@ -65,6 +76,7 @@ namespace PluginForRevit2022.Core
                     "(например M2). Журнал не примет корпус с русскими буквами, даже если они выглядят как латинские.");
             }
             FamilyInstance controller = ResolveController(doc, request.ControllerElementId);
+            if (system == "aps") request.Comments = ApsComment; // жёстко: по нему журнал и правка линий отбирают устройства АПС
 
             List<FamilyInstance> devices = ResolveDevices(doc, request.Ids);
             var warnings = new List<string>();
@@ -75,6 +87,20 @@ namespace PluginForRevit2022.Core
                 warnings.Add($"нет галочки системы в настройках маркировки, исключены: {excluded.Count} ({string.Join(", ", excluded.Select(d => d.Symbol.FamilyName).Distinct())})");
                 devices = devices.Except(excluded).ToList();
                 if (devices.Count == 0) throw new InvalidOperationException("Ни у одного выбранного семейства нет галочки этой системы в настройках маркировки.");
+            }
+            // Правило маркировки: устройства и трассы линии — с одним «Комментарии» (АПС — «АПС»).
+            // Остальное не участвует, даже если подходит по остальным условиям
+            string comment = request.Comments?.Trim();
+            if (!string.IsNullOrEmpty(comment))
+            {
+                List<FamilyInstance> uncommented = devices.Where(d => !HasComment(d, comment)).ToList();
+                if (uncommented.Count > 0)
+                {
+                    warnings.Add($"нет «Комментарии» = «{comment}», исключены: {uncommented.Count} ({string.Join(", ", uncommented.Select(d => d.Symbol.FamilyName).Distinct().Take(5))})");
+                    devices = devices.Except(uncommented).ToList();
+                    if (devices.Count == 0)
+                        throw new InvalidOperationException($"Ни у одного выбранного устройства нет «Комментарии» = «{comment}». Заполните его у устройств линии и повторите.");
+                }
             }
             string order = (request.Order ?? "manual").Trim().ToLowerInvariant();
             if (order != "route" && order != "snake" && order != "manual") throw new ArgumentException("order: manual, route или snake.");
@@ -330,7 +356,7 @@ namespace PluginForRevit2022.Core
             return new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories))
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
                 .Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) && (system == "aps"
-                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim()
+                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim() && HasApsComment(e)
                     : Value(e, ParamAddress) == address && (system != "souye" || Value(e, ParamBuilding) == r.Building?.Trim())));
         }
 
@@ -421,7 +447,9 @@ namespace PluginForRevit2022.Core
                 ?? throw new ArgumentException($"Прибор id {request.ControllerElementId} не найден.");
 
             // 1. По ходу кабеля: кабель линии собирается из отрезков и обходится от прибора.
-            Func<Element, bool> lineCable = e => IsLineRoute(e, request.Controller, request.Line);
+            string comment = request.Comments?.Trim();
+            bool commented = !string.IsNullOrEmpty(comment);
+            Func<Element, bool> lineCable = e => IsLineRoute(e, request.Controller, request.Line) && (!commented || HasComment(e, comment));
             List<FamilyInstance> lineCables = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_MechanicalEquipment)
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
                 .Where(c => c.Symbol.FamilyName != "ARBM_Межэтажный переход" && c.Location is LocationCurve)
@@ -445,7 +473,7 @@ namespace PluginForRevit2022.Core
             }
             if (ofLine.Count > 0 && noFloor.Count == 0)
             {
-                List<FamilyInstance> walked = CableWalk.Order(doc, ofLine, controller, devices, out List<FamilyInstance> notReached, out string problem);
+                List<FamilyInstance> walked = CableWalk.Order(doc, ofLine, controller, devices, out List<FamilyInstance> notReached, out string problem, commented ? comment : null);
                 if (walked != null && walked.Count >= devices.Count * 0.9)
                 {
                     if (notReached.Count > 0)
@@ -481,7 +509,7 @@ namespace PluginForRevit2022.Core
                     ControllerId = new ControllerId { ControllerPrefix = "ARK", FloorNumber = 1, ControllerNumber = 1 },
                     Loops = new List<LoopGroup> { new LoopGroup { LoopNumber = 1, Devices = devices.ToList() } },
                 };
-                Func<Element, bool> byLine = e => IsLineRoute(e, request.Controller, request.Line);
+                Func<Element, bool> byLine = e => IsLineRoute(e, request.Controller, request.Line) && (!commented || HasComment(e, comment));
                 int lineRoutes = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_MechanicalEquipment)
                     .WhereElementIsNotElementType().Count(byLine);
                 string source;

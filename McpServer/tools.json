@@ -1524,7 +1524,7 @@
           },
           "comments": {
             "type": "string",
-            "description": "Comments value used by the journal to select elements. Empty = existing Comments are kept. For order=route it is the fallback route filter when no routes have ADSK_Группирование of this line."
+            "description": "Comments value of the line. Only devices and routes (cables, floor transitions) with exactly this Comments take part; others are excluded with a warning. For aps it is always АПС (the value given is ignored). Empty (security/souye) = no filter."
           },
           "floor": {
             "type": "string",

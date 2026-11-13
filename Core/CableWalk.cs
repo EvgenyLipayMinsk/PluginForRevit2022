@@ -28,8 +28,9 @@ namespace PluginForRevit2022.Core
         }
 
         /// <summary>Устройства в порядке обхода; reached — сколько устройств кабель от прибора нашёл.</summary>
+        /// <param name="comment">Если задан — межэтажные переходы только с этими «Комментарии» (как трассы линии).</param>
         public static List<FamilyInstance> Order(Document doc, List<FamilyInstance> cables, FamilyInstance controller, List<FamilyInstance> devices,
-            out List<FamilyInstance> missed, out string problem)
+            out List<FamilyInstance> missed, out string problem, string comment = null)
         {
             missed = new List<FamilyInstance>();
             problem = null;
@@ -139,7 +140,8 @@ namespace PluginForRevit2022.Core
 
             var transitions = new List<Node>();
             foreach (FamilyInstance transition in new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
-                         .Where(f => f.Symbol.FamilyName == TransitionFamily && f.Location is LocationPoint))
+                         .Where(f => f.Symbol.FamilyName == TransitionFamily && f.Location is LocationPoint
+                                     && (comment == null || DeviceMarkingOperations.HasComment(f, comment))))
             {
                 XYZ p = ((LocationPoint)transition.Location).Point;
                 long level = LevelOf(transition);

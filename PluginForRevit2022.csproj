@@ -131,6 +131,7 @@
     <Compile Include="CmdInstructions.cs" />
     <Compile Include="CmdSaveLog.cs" />
     <Compile Include="CmdDeviceLine.cs" />
+    <Compile Include="CmdLineManager.cs" />
     <Compile Include="CmdMarkingSettings.cs" />
     <Compile Include="CmdPlaceDetectors.cs" />
     <Compile Include="CmdRemoveParameters.cs" />

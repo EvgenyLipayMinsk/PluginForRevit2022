@@ -270,7 +270,7 @@ namespace PluginForRevit2022
             Row("Номер прибора", _controller);
             Row("БЦО (если для семейства не задано в настройках)", _bco);
             Row("Номер линии", _line);
-            Row("Комментарии (значение для отбора в журнале)", _comments);
+            Row("Комментарии: участвуют только устройства и трассы с этим значением (для АПС всегда «АПС»)", _comments);
             Row("Этаж для уровней без номера в имени (например «Тех. Пространство»)", _floor);
             Row("Параметр этажа для СОУЭ", _standard);
             Row("Начать нумерацию с", _start);
@@ -280,6 +280,17 @@ namespace PluginForRevit2022
             panel.Children.Add(ok);
             Content = panel;
             LoadLast();
+            _system.SelectionChanged += (s, e) => LockComments();
+            LockComments();
+        }
+
+        /// <summary>АПС: комментарий задан жёстко — по нему линия и журнал отбирают устройства.</summary>
+        private void LockComments()
+        {
+            bool aps = Value(_system) == "aps";
+            if (aps) _comments.Text = Core.DeviceMarkingOperations.ApsComment;
+            _comments.IsReadOnly = aps;
+            _comments.Background = aps ? System.Windows.SystemColors.ControlBrush : System.Windows.SystemColors.WindowBrush;
         }
 
         /// <summary>Подставляет значения последнего запуска; без файла окно остаётся пустым.</summary>

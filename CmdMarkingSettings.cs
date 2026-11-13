@@ -55,6 +55,7 @@ namespace PluginForRevit2022
         private readonly TextBox _securityPercent = Number();
         private readonly TextBox _souyePercent = Number();
         private readonly TextBox _lineReserve = Number();
+        private readonly TextBlock _other = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DarkGoldenrod, Margin = new Thickness(0, 4, 0, 0) };
         private List<FamilySetting> _rows;
         private bool _reloading;
 
@@ -81,6 +82,7 @@ namespace PluginForRevit2022
             bar.Children.Add(Tool("Сохранить", "Сохранить текущий профиль", SaveProfile));
             bar.Children.Add(Tool("Удалить", "Удалить текущий профиль", DeleteProfile));
             bar.Children.Add(Tool("Открыть файл…", "Подключить файл профиля, полученный от коллеги", OpenProfile));
+            bar.Children.Add(Tool("Обновить список", "Перечитать семейства проекта (например, после загрузки нового семейства)", Refresh));
             _profiles.SelectionChanged += (s, e) => SwitchProfile();
 
             var reserves = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
@@ -97,6 +99,7 @@ namespace PluginForRevit2022
             top.Children.Add(bar);
             top.Children.Add(reserves);
             top.Children.Add(new TextBlock { Text = "В линии каждой системы участвуют только семейства с её галочкой. Пустое БЦО — берётся значение из окна маркировки. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+            top.Children.Add(_other);
 
             var layout = new Grid { Margin = new Thickness(12) };
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -127,7 +130,18 @@ namespace PluginForRevit2022
             _lineReserve.Text = Text(journal.LineReserveM);
             _rows = MarkingSettings.ForDocument(_doc);
             _table.ItemsSource = _rows;
+            List<string> other = MarkingSettings.OtherCategoryFamilies(_doc);
+            _other.Text = other.Count == 0 ? ""
+                : $"Не показаны семейства других категорий (маркируются только «Пожарная сигнализация», «Данные» и «Вызов медперсонала»): {string.Join(", ", other.Take(8))}" + (other.Count > 8 ? $" и ещё {other.Count - 8}" : "") + ".";
+            _other.Visibility = other.Count == 0 ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
             _reloading = false;
+        }
+
+        /// <summary>Перечитать семейства проекта, не теряя правок в таблице.</summary>
+        private void Refresh()
+        {
+            Store();
+            Reload();
         }
 
         private void Store()

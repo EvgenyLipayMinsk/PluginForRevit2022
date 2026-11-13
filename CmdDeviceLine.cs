@@ -44,9 +44,10 @@ namespace PluginForRevit2022
         private static string _lastKey;
 
         /// <summary>Возвращает выбранную линию или null при отмене.</summary>
-        public static LineInfo Ask(UIApplication uiApp, string title, bool offerStart, out bool atStart)
+        public static LineInfo Ask(UIApplication uiApp, string title, bool offerStart, out bool atStart, out bool atEnd)
         {
             atStart = false;
+            atEnd = false;
             UIDocument uiDoc = uiApp.ActiveUIDocument;
             List<LineInfo> lines = DeviceLineOperations.ListLines(uiDoc.Document);
             if (lines.Count == 0)
@@ -59,6 +60,7 @@ namespace PluginForRevit2022
             new WindowInteropHelper(window).Owner = uiApp.MainWindowHandle;
             if (window.ShowDialog() != true) return null;
             atStart = window.AtStart;
+            atEnd = window.AtEnd;
 
             LineInfo chosen = window.Selected;
             if (window.PickOnPlan)
@@ -87,10 +89,12 @@ namespace PluginForRevit2022
             HeadersVisibility = DataGridHeadersVisibility.Column,
         };
         private readonly System.Windows.Controls.CheckBox _atStart = new System.Windows.Controls.CheckBox { Content = "Вставить в начало линии (первым номером)", Margin = new Thickness(0, 8, 0, 0) };
+        private readonly System.Windows.Controls.CheckBox _atEnd = new System.Windows.Controls.CheckBox { Content = "Добавить в конец линии (последним номером)", Margin = new Thickness(0, 4, 0, 0) };
 
         public LineInfo Selected => _table.SelectedItem as LineInfo;
         public bool PickOnPlan { get; private set; }
         public bool AtStart => _atStart.IsChecked == true;
+        public bool AtEnd => _atEnd.IsChecked == true;
 
         public LinePickerWindow(string title, List<LineInfo> lines, bool offerStart)
         {
@@ -115,7 +119,14 @@ namespace PluginForRevit2022
             buttons.Children.Add(ok);
 
             var bottom = new StackPanel();
-            if (offerStart) bottom.Children.Add(_atStart);
+            if (offerStart)
+            {
+                // Начало и конец взаимоисключающие; без галочек — после устройства, указанного кликом
+                _atStart.Checked += (s, e) => _atEnd.IsChecked = false;
+                _atEnd.Checked += (s, e) => _atStart.IsChecked = false;
+                bottom.Children.Add(_atStart);
+                bottom.Children.Add(_atEnd);
+            }
             bottom.Children.Add(buttons);
 
             var layout = new Grid { Margin = new Thickness(12) };
@@ -158,15 +169,16 @@ namespace PluginForRevit2022
             Document doc = uiDoc.Document;
             try
             {
-                LineInfo line = LineChoice.Ask(commandData.Application, Caption, true, out bool atStart);
+                LineInfo line = LineChoice.Ask(commandData.Application, Caption, true, out bool atStart, out bool atEnd);
                 if (line == null) return Result.Cancelled;
                 HashSet<long> members = DeviceLineOperations.MemberIds(doc, line.Key);
 
-                SessionWindows.Inform("line-add-hint", Caption, atStart
-                    ? "Кликните новое устройство: оно встанет первым номером линии."
+                SessionWindows.Inform(atStart || atEnd ? "line-add-hint-edge" : "line-add-hint", Caption,
+                    atStart ? "Кликните новое устройство: оно встанет первым номером линии."
+                    : atEnd ? "Кликните новое устройство: оно встанет последним номером линии."
                     : "Шаг 1: кликните устройство линии, после которого встанет новое.\n\nШаг 2: кликните новое устройство.");
-                long? after = atStart
-                    ? (long?)null
+                long? after = atStart ? (long?)null
+                    : atEnd ? DeviceLineOperations.LastMemberId(doc, line.Key)
                     : RevitIds.IdOf(uiDoc.Selection.PickObject(ObjectType.Element, new LineDeviceFilter(members), "Устройство линии, после которого вставить").ElementId);
                 long device = RevitIds.IdOf(uiDoc.Selection.PickObject(ObjectType.Element, new LineDeviceFilter(members, false), "Новое устройство").ElementId);
 
@@ -202,7 +214,7 @@ namespace PluginForRevit2022
             Document doc = uiDoc.Document;
             try
             {
-                LineInfo line = LineChoice.Ask(commandData.Application, Caption, false, out _);
+                LineInfo line = LineChoice.Ask(commandData.Application, Caption, false, out _, out _);
                 if (line == null) return Result.Cancelled;
                 HashSet<long> members = DeviceLineOperations.MemberIds(doc, line.Key);
 

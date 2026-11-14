@@ -286,89 +286,148 @@ namespace PluginForRevit2022.Core
             var typeDone = new HashSet<string>(); // typeId:param — параметр типа меняем один раз
             int changed = 0, skipped = 0;
 
-            using (var transaction = new Transaction(doc, "AerBIM: значения параметров"))
+            // Один проход по элементам: записывает значения и ведёт учёт (при повторе по одному — сбрасывается)
+            void Reset() { changes.Clear(); typesTouched.Clear(); typeDone.Clear(); changed = 0; skipped = 0; }
+            void Fill(IEnumerable<(Element element, Dictionary<string, string> values)> items)
             {
-                transaction.Start();
-                foreach (var (element, values) in work)
-                {
-                    foreach (KeyValuePair<string, string> kv in values)
+                    foreach (var (element, values) in items)
                     {
-                        Parameter p = Find(element, kv.Key, out bool isType);
-                        string status;
-                        string message = null;
-                        string oldValue = p == null ? null : RevitText.ValueText(p);
-                        string newValue = oldValue;
+                        foreach (KeyValuePair<string, string> kv in values)
+                        {
+                            Parameter p = Find(element, kv.Key, out bool isType);
+                            string status;
+                            string message = null;
+                            string oldValue = p == null ? null : RevitText.ValueText(p);
+                            string newValue = oldValue;
 
-                        if (p == null)
-                        {
-                            status = "not_found";
-                        }
-                        else if (isType && !request.AllowTypeParameters)
-                        {
-                            status = "type_parameter_blocked";
-                            message = "это параметр типа: изменение затронет все экземпляры типа — разрешите allowTypeParameters";
-                        }
-                        else if (isType && typeDone.Contains(element.GetTypeId() + ":" + kv.Key))
-                        {
-                            status = "type_already_set";
-                            newValue = RevitText.ValueText(p);
-                        }
-                        else if (p.IsReadOnly)
-                        {
-                            status = "read_only";
-                            message = "только для чтения (вычисляемый, формула или системный)";
-                        }
-                        else
-                        {
-                            string error = RevitText.TrySet(p, kv.Key, kv.Value);
-                            newValue = RevitText.ValueText(p);
-                            if (error != null)
+                            if (p == null)
                             {
-                                status = "failed";
-                                message = error;
+                                status = "not_found";
+                            }
+                            else if (isType && !request.AllowTypeParameters)
+                            {
+                                status = "type_parameter_blocked";
+                                message = "это параметр типа: изменение затронет все экземпляры типа — разрешите allowTypeParameters";
+                            }
+                            else if (isType && typeDone.Contains(element.GetTypeId() + ":" + kv.Key))
+                            {
+                                status = "type_already_set";
+                                newValue = RevitText.ValueText(p);
+                            }
+                            else if (p.IsReadOnly)
+                            {
+                                status = "read_only";
+                                message = "только для чтения (вычисляемый, формула или системный)";
                             }
                             else
                             {
-                                status = string.Equals(oldValue ?? "", newValue ?? "", StringComparison.CurrentCulture) ? "unchanged" : "changed";
-                                if (isType)
+                                string error = RevitText.TrySet(p, kv.Key, kv.Value);
+                                newValue = RevitText.ValueText(p);
+                                if (error != null)
                                 {
-                                    ElementId typeId = element.GetTypeId();
-                                    typeDone.Add(typeId + ":" + kv.Key);
-                                    if (!typesTouched.TryGetValue(typeId, out var info))
+                                    status = "failed";
+                                    message = error;
+                                }
+                                else
+                                {
+                                    status = string.Equals(oldValue ?? "", newValue ?? "", StringComparison.CurrentCulture) ? "unchanged" : "changed";
+                                    if (isType)
                                     {
-                                        info = (doc.GetElement(typeId)?.Name, new HashSet<string>());
-                                        typesTouched[typeId] = info;
+                                        ElementId typeId = element.GetTypeId();
+                                        typeDone.Add(typeId + ":" + kv.Key);
+                                        if (!typesTouched.TryGetValue(typeId, out var info))
+                                        {
+                                            info = (doc.GetElement(typeId)?.Name, new HashSet<string>());
+                                            typesTouched[typeId] = info;
+                                        }
+                                        info.parameters.Add(kv.Key);
                                     }
-                                    info.parameters.Add(kv.Key);
                                 }
                             }
-                        }
 
-                        if (status == "changed") changed++; else if (status != "unchanged" && status != "type_already_set") skipped++;
-                        if (changes.Count < MaxRowsInAnswer)
-                        {
-                            changes.Add(new Dictionary<string, object>
+                            if (status == "changed") changed++; else if (status != "unchanged" && status != "type_already_set") skipped++;
+                            if (changes.Count < MaxRowsInAnswer)
                             {
-                                ["id"] = RevitIds.IdOf(element.Id),
-                                ["element"] = element.Name,
-                                ["parameter"] = kv.Key,
-                                ["isType"] = isType,
-                                ["old"] = oldValue,
-                                ["new"] = newValue,
-                                ["status"] = status,
-                                ["message"] = message,
-                            });
+                                changes.Add(new Dictionary<string, object>
+                                {
+                                    ["id"] = RevitIds.IdOf(element.Id),
+                                    ["element"] = element.Name,
+                                    ["parameter"] = kv.Key,
+                                    ["isType"] = isType,
+                                    ["old"] = oldValue,
+                                    ["new"] = newValue,
+                                    ["status"] = status,
+                                    ["message"] = message,
+                                });
+                            }
                         }
                     }
-                }
 
+            }
+
+            var rejected = new List<string>();
+            var revitWarnings = new List<string>();
+            bool committed = false;
+            using (var transaction = new Transaction(doc, "AerBIM: значения параметров"))
+            {
+                FailureCollector failures = FailureCollector.Attach(transaction);
+                transaction.Start();
+                Fill(work);
                 if (request.DryRun || changed == 0)
                 {
                     transaction.RollBack();
                 }
-                else if (transaction.Commit() != TransactionStatus.Committed)
+                else if (transaction.Commit() == TransactionStatus.Committed)
                 {
-                    throw new InvalidOperationException("Revit не применил изменения.");
+                    committed = true;
+                    revitWarnings.AddRange(failures.Warnings);
+                }
+            }
+
+            if (!request.DryRun && changed > 0 && !committed)
+            {
+                // Revit отклонил запись целиком (ошибка у одного элемента откатывает всё): пишем по одному элементу,
+                // отклонённые пропускаем с причиной. Всё вместе — одна операция Ctrl+Z.
+                Reset();
+                using (var group = new TransactionGroup(doc, "AerBIM: значения параметров"))
+                {
+                    group.Start();
+                    foreach (var item in work)
+                    {
+                        int changedBefore = changed, skippedBefore = skipped, rowsBefore = changes.Count;
+                        using (var single = new Transaction(doc, "AerBIM: значение параметра"))
+                        {
+                            FailureCollector failures = FailureCollector.Attach(single);
+                            single.Start();
+                            Fill(new[] { item });
+                            if (changed == changedBefore)
+                            {
+                                single.RollBack();
+                                continue;
+                            }
+                            if (single.Commit() == TransactionStatus.Committed)
+                            {
+                                revitWarnings.AddRange(failures.Warnings);
+                                continue;
+                            }
+                            string reason = failures.Errors.Count > 0 ? string.Join("; ", failures.Errors.Distinct()) : "Revit отклонил изменение";
+                            rejected.Add($"id {RevitIds.IdOf(item.element.Id)}: {reason}");
+                            skipped = skippedBefore + (changed - changedBefore);
+                            changed = changedBefore;
+                            for (int i = rowsBefore; i < changes.Count; i++)
+                            {
+                                if ((string)changes[i]["status"] != "changed") continue;
+                                changes[i]["status"] = "rejected";
+                                changes[i]["message"] = reason;
+                            }
+                        }
+                    }
+                    if (changed > 0) group.Assimilate();
+                    else group.RollBack();
+                }
+                if (changed == 0)
+                {
+                    throw new InvalidOperationException("Revit не применил изменения: " + string.Join(" | ", rejected.Take(10)));
                 }
             }
 
@@ -396,11 +455,54 @@ namespace PluginForRevit2022.Core
                 ["typeChanges"] = typeImpact,
                 ["changes"] = changes,
                 ["warnings"] = warnings,
-                ["summary"] = (request.DryRun ? "Предпросмотр: будет изменено значений: " : "Изменено значений: ") + changed +
+                ["rejected"] = rejected.Take(100).ToList(),
+                ["revitWarnings"] = revitWarnings.Distinct().Take(50).ToList(),
+                ["summary"] = (rejected.Count > 0 ? $"Revit отклонил изменение у элементов: {rejected.Count} (см. rejected), остальные записаны. " : "") + (request.DryRun ? "Предпросмотр: будет изменено значений: " : "Изменено значений: ") + changed +
                               (skipped > 0 ? $", пропущено: {skipped}" : "") +
                               (typeImpact.Count > 0 ? $"; изменяются типы: {typeImpact.Count} (см. typeChanges)" : "") +
                               (request.DryRun ? ". Для применения повторите с dryRun=false." : ". Отменить можно в Revit через Ctrl+Z."),
             };
+        }
+    }
+
+    /// <summary>
+    /// Сбор сообщений Revit при фиксации: предупреждения снимаются (запись не останавливают, текст — в ответ),
+    /// ошибки запоминаются с ID элементов и откатывают транзакцию без диалога.
+    /// </summary>
+    internal sealed class FailureCollector : IFailuresPreprocessor
+    {
+        public readonly List<string> Errors = new List<string>();
+        public readonly List<string> Warnings = new List<string>();
+
+        public static FailureCollector Attach(Transaction transaction)
+        {
+            var collector = new FailureCollector();
+            FailureHandlingOptions options = transaction.GetFailureHandlingOptions();
+            options.SetFailuresPreprocessor(collector);
+            options.SetClearAfterRollback(true);
+            transaction.SetFailureHandlingOptions(options);
+            return collector;
+        }
+
+        public FailureProcessingResult PreprocessFailures(FailuresAccessor accessor)
+        {
+            bool error = false;
+            foreach (FailureMessageAccessor message in accessor.GetFailureMessages())
+            {
+                string ids = string.Join(", ", message.GetFailingElementIds().Select(RevitIds.IdOf));
+                string text = message.GetDescriptionText() + (ids.Length > 0 ? $" (id {ids})" : "");
+                if (message.GetSeverity() == FailureSeverity.Warning)
+                {
+                    Warnings.Add(text);
+                    accessor.DeleteWarning(message);
+                }
+                else
+                {
+                    Errors.Add(text);
+                    error = true;
+                }
+            }
+            return error ? FailureProcessingResult.ProceedWithRollBack : FailureProcessingResult.Continue;
         }
     }
 }

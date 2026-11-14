@@ -279,6 +279,7 @@ namespace PluginForRevit2022.Mcp
                 args.Long("sourceId") ?? throw new ArgumentException("Укажите sourceId."), Ids(args, "targetIds"), args.StringList("parameters"), args.Bool("dryRun") ?? true));
             Register("set_element_phase", (app, args) => ElementEditOperations.SetPhase(ActiveProject(app), Ids(args, "ids"),
                 args.String("created"), args.String("demolished"), args.Bool("dryRun") ?? true));
+            Register("sync_nested_comments", (app, args) => NestedCommentOperations.Sync(ActiveProject(app), Ids(args, "ids"), args.Bool("overwrite") ?? false, args.Bool("dryRun") ?? true));
             Register("set_element_workset", (app, args) => ElementEditOperations.SetWorkset(ActiveProject(app), Ids(args, "ids"), args.String("workset"), args.Bool("dryRun") ?? true));
             Register("load_family", (app, args) => ElementEditOperations.LoadFamily(ActiveProject(app), args.String("path"), args.Bool("dryRun") ?? true));
             Register("override_graphics", (app, args) => ElementEditOperations.OverrideGraphics(ActiveProject(app), args.String("view"), Ids(args, "ids"),
@@ -498,7 +499,8 @@ namespace PluginForRevit2022.Mcp
         {
             double? aps = args.Double("apsPercent"), security = args.Double("securityPercent"),
                 souye = args.Double("souyePercent"), line = args.Double("lineReserveM");
-            if (aps == null && security == null && souye == null && line == null) return null;
+            string floor = args.String("floorParameter");
+            if (aps == null && security == null && souye == null && line == null && string.IsNullOrWhiteSpace(floor)) return null;
             JournalSettings current = MarkingSettings.CurrentJournal();
             return new JournalSettings
             {
@@ -506,6 +508,7 @@ namespace PluginForRevit2022.Mcp
                 SecurityPercent = security ?? current.SecurityPercent,
                 SouyePercent = souye ?? current.SouyePercent,
                 LineReserveM = line ?? current.LineReserveM,
+                FloorParameter = string.IsNullOrWhiteSpace(floor) ? current.FloorParameter : floor.Trim(),
             };
         }
 

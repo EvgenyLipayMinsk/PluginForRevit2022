@@ -55,6 +55,7 @@ namespace PluginForRevit2022
         private readonly TextBox _securityPercent = Number();
         private readonly TextBox _souyePercent = Number();
         private readonly TextBox _lineReserve = Number();
+        private readonly ComboBox _floorParameter = new ComboBox { MinWidth = 160, IsEditable = true, Margin = new Thickness(6, 0, 0, 0) };
         private readonly TextBlock _other = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DarkGoldenrod, Margin = new Thickness(0, 4, 0, 0) };
         private List<FamilySetting> _rows;
         private bool _reloading;
@@ -63,8 +64,8 @@ namespace PluginForRevit2022
         {
             _doc = doc;
             Title = "Настройки маркировки";
-            Width = 860;
-            MinWidth = 860;
+            Width = 940;
+            MinWidth = 700;
             Height = 580;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
@@ -72,10 +73,11 @@ namespace PluginForRevit2022
             {
                 _table.Columns.Add(new DataGridCheckBoxColumn { Header = header, Binding = new System.Windows.Data.Binding(property) { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged } });
             }
+            _table.Columns.Add(new DataGridCheckBoxColumn { Header = "ЗКПС", Binding = new System.Windows.Data.Binding("ZkpsOn") { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged } });
             _table.Columns.Add(new DataGridTextColumn { Header = "Семейство", Binding = new System.Windows.Data.Binding("Name"), IsReadOnly = true, Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
             _table.Columns.Add(new DataGridTextColumn { Header = "БЦО", Binding = new System.Windows.Data.Binding("Bco") { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged }, Width = 120 });
 
-            var bar = new StackPanel { Orientation = Orientation.Horizontal };
+            var bar = new WrapPanel(); // узкое окно — кнопки переносятся, а не обрезаются
             bar.Children.Add(new TextBlock { Text = "Профиль", VerticalAlignment = VerticalAlignment.Center });
             bar.Children.Add(_profiles);
             bar.Children.Add(Tool("Добавить профиль", "Создать новый профиль", NewProfile));
@@ -85,7 +87,7 @@ namespace PluginForRevit2022
             bar.Children.Add(Tool("Обновить список", "Перечитать семейства проекта (например, после загрузки нового семейства)", Refresh));
             _profiles.SelectionChanged += (s, e) => SwitchProfile();
 
-            var reserves = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            var reserves = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
             reserves.Children.Add(new TextBlock { Text = "Запас кабеля, %:", VerticalAlignment = VerticalAlignment.Center });
             foreach (var (label, box) in new[] { ("АПС", _apsPercent), ("СОТС", _securityPercent), ("СОУЭ", _souyePercent) })
             {
@@ -95,10 +97,17 @@ namespace PluginForRevit2022
             reserves.Children.Add(new TextBlock { Text = "Запас на каждую линию, м", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 4, 0) });
             reserves.Children.Add(_lineReserve);
 
+            var floor = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            floor.Children.Add(new TextBlock { Text = "Параметр этажа:", VerticalAlignment = VerticalAlignment.Center });
+            _floorParameter.ToolTip = "Список — параметры проекта, в имени которых есть «этаж». Можно вписать имя вручную.";
+            floor.Children.Add(_floorParameter);
+            floor.Children.Add(new TextBlock { Text = "для оповещателей СОУЭ — маркировка и журнал СОУЭ; АПС и СОТС — всегда ADSK_Этаж", Foreground = System.Windows.Media.Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) });
+
             var top = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             top.Children.Add(bar);
             top.Children.Add(reserves);
-            top.Children.Add(new TextBlock { Text = "В линии каждой системы участвуют только семейства с её галочкой. Пустое БЦО — берётся значение из окна маркировки. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+            top.Children.Add(floor);
+            top.Children.Add(new TextBlock { Text = "В линии каждой системы участвуют только семейства с её галочкой. Без БЦО семейство не маркируется: маркировка остановится и покажет такие семейства. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
             top.Children.Add(_other);
 
             var layout = new Grid { Margin = new Thickness(12) };
@@ -113,7 +122,7 @@ namespace PluginForRevit2022
 
         private Button Tool(string text, string tip, Action action)
         {
-            var button = new Button { Content = text, ToolTip = tip, Margin = new Thickness(6, 0, 0, 0), Padding = new Thickness(8, 2, 8, 2) };
+            var button = new Button { Content = text, ToolTip = tip, Margin = new Thickness(6, 0, 0, 4), Padding = new Thickness(8, 2, 8, 2) };
             button.Click += (s, e) => Guarded(action);
             return button;
         }
@@ -128,6 +137,8 @@ namespace PluginForRevit2022
             _securityPercent.Text = Text(journal.SecurityPercent);
             _souyePercent.Text = Text(journal.SouyePercent);
             _lineReserve.Text = Text(journal.LineReserveM);
+            _floorParameter.ItemsSource = MarkingSettings.FloorParameters(_doc);
+            _floorParameter.Text = string.IsNullOrWhiteSpace(journal.FloorParameter) ? "ADSK_Этаж" : journal.FloorParameter;
             _rows = MarkingSettings.ForDocument(_doc);
             _table.ItemsSource = _rows;
             List<string> other = MarkingSettings.OtherCategoryFamilies(_doc);
@@ -153,10 +164,15 @@ namespace PluginForRevit2022
                 SecurityPercent = Read(_securityPercent),
                 SouyePercent = Read(_souyePercent),
                 LineReserveM = Read(_lineReserve),
+                FloorParameter = string.IsNullOrWhiteSpace(_floorParameter.Text) ? "ADSK_Этаж" : _floorParameter.Text.Trim(),
             });
         }
 
-        private void SaveProfile() => Store();
+        private void SaveProfile()
+        {
+            Store();
+            MessageBox.Show(this, $"Профиль «{MarkingSettings.Current().Name}» сохранён.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
         private void SwitchProfile()
         {

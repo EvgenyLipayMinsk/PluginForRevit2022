@@ -1338,7 +1338,7 @@
     {
       "name": "set_parameter_values",
       "title": "Write parameter values",
-      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z).",
+      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z). If Revit rejects the batch (an error on one element rolls back everything), values are written element by element: rejected elements are skipped and listed in rejected with the Revit message; Revit warnings do not stop the write and are returned in revitWarnings. All of it is one Ctrl+Z step.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1524,11 +1524,11 @@
           },
           "comments": {
             "type": "string",
-            "description": "Comments value of the line. Only devices and routes (cables, floor transitions) with exactly this Comments take part; others are excluded with a warning. For aps it is always АПС (the value given is ignored). Empty (security/souye) = no filter."
+            "description": "Comments value of the line. Only devices and routes (cables, floor transitions) with exactly this Comments take part; others are excluded with a warning. Required for aps (any value, e.g. АПС). Empty (security/souye) = no filter."
           },
           "floor": {
             "type": "string",
-            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. SOUYE: ARBM_ПСБ_Адрес устройства is written as the loop number only (integer), security as controller.loop."
+            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. SOUYE: ARBM_ПСБ_Адрес устройства is written as the loop number only (integer), security as controller.loop. Takes priority over the floors set in the marking window («Этажи уровней без номера»), which are used when floor is omitted."
           },
           "parameterStandard": {
             "type": "string",
@@ -1536,7 +1536,7 @@
               "adsk",
               "eom"
             ],
-            "description": "souye only: which floor parameter to fill."
+            "description": "Deprecated and ignored: the SOUE floor parameter is taken from marking settings («Параметр этажа», set_marking_settings floorParameter); APS and SOTS always use ADSK_Этаж."
           },
           "startNumber": {
             "type": "integer",
@@ -1705,7 +1705,7 @@
                 },
                 "bco": {
                   "type": "string",
-                  "description": "BCO for this family; empty = value from marking."
+                  "description": "BCO for this family. Without it devices of the family are not marked (marking stops with the list)."
                 },
                 "aps": {
                   "type": "boolean",
@@ -1740,6 +1740,10 @@
           "lineReserveM": {
             "type": "number",
             "description": "Metres added to every journal row. Each reserve (the three percents and this) changes only when passed; the others keep their profile values."
+          },
+          "floorParameter": {
+            "type": "string",
+            "description": "Floor parameter of SOUE devices (any instance text parameter with «этаж» in its name). Used by marking and by the SOUE cable journal."
           }
         }
       }
@@ -1798,7 +1802,7 @@
     {
       "name": "add_device_to_line",
       "title": "Add device to a marked line",
-      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line.",
+      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line. The new device must already have the line's Comments value, otherwise it is refused.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1857,7 +1861,7 @@
     {
       "name": "list_marked_lines",
       "title": "List marked lines",
-      "description": "Lists marked lines in the project: system, building, controller, line number, device count and capacity. Use it to ask the designer which line to work with.",
+      "description": "Lists marked lines in the project: system, building, controller, line number, device count and capacity. Use it to ask the designer which line to work with. An aps line is building + controller + line + Comments (set at marking); devices without Comments are ignored, a different Comments value forms a separate line. Sorted numerically by controller and line.",
       "inputSchema": {
         "type": "object",
         "properties": {}
@@ -2879,6 +2883,33 @@
         "required": [
           "ids"
         ]
+      }
+    },
+    {
+      "name": "sync_nested_comments",
+      "title": "Nested family comments from parent",
+      "description": "Sets the Comments of nested shared family instances (e.g. a battery inside a power supply, a box inside a detector) to the Comments of their top parent instance. By default only empty Comments are filled (overwrite=true replaces other values); parents without Comments are skipped. dryRun defaults to true: shows counts by family and changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only these nested instances; omitted = all nested instances in the project."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Replace a different non-empty comment."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = preview (default); false = apply."
+          }
+        }
       }
     },
     {

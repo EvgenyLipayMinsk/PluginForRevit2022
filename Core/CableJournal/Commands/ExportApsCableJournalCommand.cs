@@ -69,7 +69,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // that already have Comments parameter set
                 Reference pickedRef = uidoc.Selection.PickObject(
                     ObjectType.Element,
-                    new CommentsFilter("АПС"));
+                    new CommentsFilter()); // комментарий линии задаётся при маркировке — любой непустой
 
                 // Если пользователь отменил выбор (нажал Escape или закрыл диалог)
                 // EN: If user cancelled selection (pressed Escape or closed dialog)

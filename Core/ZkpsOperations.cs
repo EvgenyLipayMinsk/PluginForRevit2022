@@ -31,6 +31,7 @@ namespace PluginForRevit2022.Core
             if (groups.Count == 0) throw new InvalidOperationException($"Не найдено групп узлов с «{pattern}» в имени.");
 
             List<FamilyInstance> devices;
+            MarkingSettings zkpsSettings = MarkingSettings.Load();
             if (!string.IsNullOrWhiteSpace(commentsContains))
             {
                 // Устройства любой категории с нужным текстом в «Комментариях», кроме приборов (электрооборудование)
@@ -52,6 +53,10 @@ namespace PluginForRevit2022.Core
                     .Where(d => settings.IsInLine(d.Symbol.FamilyName, "aps") && d.Location is LocationPoint)
                     .ToList();
             }
+            // Семейства без ЗКПС (изоляторы, ИПР — галочка «ЗКПС» в настройках маркировки): не заполняются, прежнее значение очищается
+            List<FamilyInstance> noZkps = devices.Where(d => !zkpsSettings.GetsZkps(d.Symbol.FamilyName)).ToList();
+            devices = devices.Except(noZkps).ToList();
+            List<FamilyInstance> noZkpsToClear = noZkps.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).ToList();
 
             var changes = new List<(FamilyInstance device, string value, string zone)>();
             var report = new List<Dictionary<string, object>>();
@@ -174,7 +179,7 @@ namespace PluginForRevit2022.Core
             List<FamilyInstance> outsideDevices = devices.Where(d =>
                 !assigned.Contains(RevitIds.IdOf(d.Id)) && !inOpenZone.Contains(RevitIds.IdOf(d.Id)) &&
                 processedLevels.Contains(RevitIds.IdOf(LevelOf(d)))).ToList();
-            List<FamilyInstance> toClear = outsideDevices.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).ToList();
+            List<FamilyInstance> toClear = outsideDevices.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).Concat(noZkpsToClear).ToList();
 
             int changed = 0, cleared = 0;
             var failures = new List<string>();
@@ -212,10 +217,12 @@ namespace PluginForRevit2022.Core
                 ["outsideZonesToClear"] = toClear.Count,
                 ["cleared"] = cleared,
                 ["inOpenZonesKept"] = inOpenZone.Count,
+                ["withoutZkps"] = noZkps.Count,
+                ["withoutZkpsToClear"] = noZkpsToClear.Count,
                 ["failures"] = failures.Take(50).ToList(),
                 ["warnings"] = warnings,
                 ["summary"] = dryRun
-                    ? $"Предпросмотр: устройств в зонах ЗКПС: {changes.Count}, вне зон на этих уровнях: {outside} (у {toClear.Count} прежняя ЗКПС будет очищена), в незамкнутых зонах (не меняются): {inOpenZone.Count}. Для записи повторите с dryRun=false."
+                    ? $"Предпросмотр: устройств в зонах ЗКПС: {changes.Count}, вне зон на этих уровнях: {outside} (у {toClear.Count} прежняя ЗКПС будет очищена), в незамкнутых зонах (не меняются): {inOpenZone.Count}; изоляторы и ИПР без ЗКПС: {noZkps.Count} (очистится у {noZkpsToClear.Count}). Для записи повторите с dryRun=false."
                     : failures.Count > 0 ? $"ЗКПС не записаны: ошибок {failures.Count}." : $"Записано ARBM_ЗКПС: {changed}, очищено вне зон: {cleared}. Отменить можно через Ctrl+Z.",
             };
         }

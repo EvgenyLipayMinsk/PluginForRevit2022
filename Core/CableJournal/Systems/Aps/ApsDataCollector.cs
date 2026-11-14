@@ -65,6 +65,7 @@ namespace ARBM.CableJournalExporter.Services
                     .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                     .WhereElementIsNotElementType()
                     .OfType<FamilyInstance>()
+                    .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                     .Where(c =>
                     {
                         string comments = c.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
@@ -126,6 +127,7 @@ namespace ARBM.CableJournalExporter.Services
                     .OfCategory(BuiltInCategory.OST_DataDevices)
                     .WhereElementIsNotElementType()
                     .OfType<FamilyInstance>()
+                    .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                     .Where(d =>
                     {
                         string comments = d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
@@ -143,6 +145,7 @@ namespace ARBM.CableJournalExporter.Services
                     .OfCategory(BuiltInCategory.OST_FireAlarmDevices)
                     .WhereElementIsNotElementType()
                     .OfType<FamilyInstance>()
+                    .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                     .Where(d =>
                     {
                         string comments = d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();

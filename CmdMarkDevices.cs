@@ -24,7 +24,7 @@ namespace PluginForRevit2022
             UIDocument uiDoc = commandData.Application.ActiveUIDocument;
             Document doc = uiDoc.Document;
 
-            var window = new MarkDevicesWindow(DeviceLineOperations.ListLines(doc).Select(l => l.Title).ToList());
+            var window = new MarkDevicesWindow(doc);
             new WindowInteropHelper(window).Owner = commandData.Application.MainWindowHandle;
             if (window.ShowDialog() != true)
             {
@@ -38,6 +38,15 @@ namespace PluginForRevit2022
                 return Result.Cancelled;
             }
 
+            // Семейства системы без БЦО — сказать до кликов, а не после выбора всей линии
+            MarkingSettings bcoSettings = MarkingSettings.Load();
+            List<string> noBco = MarkingSettings.ReadAccount().Families
+                .Where(f => bcoSettings.IsInLine(f.Name, request.System) && string.IsNullOrWhiteSpace(f.Bco)).Select(f => f.Name).ToList();
+            if (noBco.Count > 0 && !SessionWindows.Confirm("mark-no-bco", "Маркировка",
+                    "У семейств с галочкой этой системы не задано БЦО:\n" + string.Join("\n", noBco.Select(f => "• " + f)) +
+                    "\n\nЕсли такие устройства окажутся в выборе, маркировка не начнётся. Продолжить выбор устройств?"))
+                return Result.Cancelled;
+
             try
             {
                 if (request.Order == "route")
@@ -46,19 +55,18 @@ namespace PluginForRevit2022
                         $"Маршрут строится по трассам этой линии: у семейств кабеля в «ADSK_Группирование» должно стоять …АЛС.{request.Controller}.{request.Line} " +
                         "(например СПС_АЛС.1.2 — прибор 1, линия 2). Если таких трасс нет, берутся трассы с тем же значением «Комментарии», что в окне.\n\n" +
                         "Шаг 1: кликните прибор (категория «Электрооборудование»), от которого идёт линия.\n\n" +
-                        "Шаг 2: выделите устройства линии и нажмите «Готово» на панели параметров вверху окна Revit.\n\n" +
+                        "Шаг 2: кликайте устройства линии — каждое выбранное становится синим. Порядок кликов не важен: номера пойдут по трассе. Чтобы закончить выбор, нажмите Esc.\n\n" +
                         "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
                     Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, от которого идёт линия");
                     request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
-                    IList<Reference> picked = uiDoc.Selection.PickObjects(ObjectType.Element, DeviceFilter(request.System), "Выберите устройства шлейфа и нажмите «Готово»");
-                    request.Ids = picked.Select(r => RevitIds.IdOf(r.ElementId)).ToList();
+                    request.Ids = PickInOrder(uiDoc, DeviceFilter(request.System));
                 }
                 else
                 {
                     SessionWindows.Inform("mark-manual-hint", "Маркировка",
                         "Шаг 1: кликните прибор (категория «Электрооборудование»), к которому подключена линия. " +
                         "В него запишутся данные для кабельного журнала.\n\n" +
-                        "Шаг 2: кликайте устройства по порядку номеров. Чтобы закончить выбор, нажмите Esc.\n\n" +
+                        "Шаг 2: кликайте устройства по порядку номеров — каждое выбранное становится синим. Чтобы закончить выбор, нажмите Esc.\n\n" +
                         "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
                     Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, к которому подключена линия");
                     request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
@@ -112,10 +120,11 @@ namespace PluginForRevit2022
 
         /// <summary>
         /// Клики по одному задают номера; Esc завершает выбор. Уже выбранные устройства
-        /// временно закрашиваются зелёным на текущем виде; после выбора окраска откатывается
+        /// временно закрашиваются синим на текущем виде; после выбора окраска откатывается
         /// (в проекте не остаётся), а устройства остаются выделенными.
         /// </summary>
-        private static List<long> PickInOrder(UIDocument uiDoc, ISelectionFilter filter)
+        /// <summary>Выбор кликами по порядку: каждое кликнутое устройство сразу красится синим (временно), Esc — конец.</summary>
+        internal static List<long> PickInOrder(UIDocument uiDoc, ISelectionFilter filter)
         {
             Document doc = uiDoc.Document;
             View view = uiDoc.ActiveView;
@@ -183,13 +192,14 @@ namespace PluginForRevit2022
         {
             FillPatternElement solid = new FilteredElementCollector(doc).OfClass(typeof(FillPatternElement))
                 .Cast<FillPatternElement>().FirstOrDefault(p => p.GetFillPattern().IsSolidFill);
-            var green = new Color(0, 176, 80);
+            // Синий и толстые линии: заметно и на символах-аннотациях (низкая детализация) — переопределение экземпляра действует на вложенные аннотации
+            var blue = new Color(0, 112, 192);
             var settings = new OverrideGraphicSettings()
-                .SetProjectionLineColor(green)
+                .SetProjectionLineColor(blue)
                 .SetProjectionLineWeight(6);
             if (solid != null)
             {
-                settings.SetSurfaceForegroundPatternId(solid.Id).SetSurfaceForegroundPatternColor(green);
+                settings.SetSurfaceForegroundPatternId(solid.Id).SetSurfaceForegroundPatternColor(blue);
             }
             return settings;
         }
@@ -228,21 +238,21 @@ namespace PluginForRevit2022
     {
         private readonly ComboBox _system = Combo("АПС|aps", "СОТС|security", "СОУЭ|souye");
         private readonly ComboBox _order = Combo("Вручную, кликами по устройствам|manual", "Автоматически по трассам журнала|route");
-        private readonly ComboBox _standard = Combo("ADSK_Этаж|adsk", "О_Этаж|eom");
         private readonly TextBox _building = new TextBox();
         private readonly TextBox _controller = new TextBox();
-        private readonly TextBox _bco = new TextBox();
         private readonly TextBox _line = new TextBox();
         private readonly TextBox _comments = new TextBox();
-        private readonly TextBox _floor = new TextBox();
+        private readonly Document _doc;
+        private readonly TextBlock _floorsState = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(0, 4, 0, 0) };
         private readonly TextBox _start = new TextBox { Text = "1" };
 
         public MarkDevicesRequest Request { get; private set; }
 
         public string SystemTitle => (string)((ComboBoxItem)_system.SelectedItem).Content;
 
-        public MarkDevicesWindow(List<string> existingLines)
+        public MarkDevicesWindow(Document doc)
         {
+            _doc = doc;
             Title = "Маркировка устройств";
             Width = 420;
             SizeToContent = SizeToContent.Height;
@@ -250,29 +260,28 @@ namespace PluginForRevit2022
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var panel = new StackPanel { Margin = new Thickness(12) };
-            if (existingLines.Count > 0)
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "Линии в проекте:\n" + string.Join("\n", existingLines.Take(8)) + (existingLines.Count > 8 ? $"\n… ещё {existingLines.Count - 8}" : ""),
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = System.Windows.Media.Brushes.DimGray,
-                });
-            }
             void Row(string label, Control control)
             {
-                panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 6, 0, 2) });
+                panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 2) });
                 panel.Children.Add(control);
             }
             Row("Система", _system);
             Row("Порядок номеров", _order);
             Row("Корпус (ARBM_Корпус; для СОТС не нужен)", _building);
             Row("Номер прибора", _controller);
-            Row("БЦО (если для семейства не задано в настройках)", _bco);
             Row("Номер линии", _line);
-            Row("Комментарии: участвуют только устройства и трассы с этим значением (для АПС всегда «АПС»)", _comments);
-            Row("Этаж для уровней без номера в имени (например «Тех. Пространство»)", _floor);
-            Row("Параметр этажа для СОУЭ", _standard);
+            Row("Комментарии линии (например АПС): участвуют только устройства и трассы с этим значением", _comments);
+            // Уровни без номера в имени («Тех. пространство», «Кровля») — у каждого свой этаж, задаётся отдельно
+            var floors = new Button { Content = "Этажи уровней без номера…", Margin = new Thickness(0, 10, 0, 0), Padding = new Thickness(6, 3, 6, 3), HorizontalAlignment = HorizontalAlignment.Left };
+            floors.Click += (s, e) =>
+            {
+                var dialog = new LevelFloorsWindow(_doc) { Owner = this };
+                dialog.ShowDialog();
+                UpdateFloorsState();
+            };
+            panel.Children.Add(floors);
+            panel.Children.Add(_floorsState);
+            UpdateFloorsState();
             Row("Начать нумерацию с", _start);
 
             var ok = new Button { Content = "Далее: выбрать устройства", IsDefault = true, Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(6) };
@@ -280,17 +289,6 @@ namespace PluginForRevit2022
             panel.Children.Add(ok);
             Content = panel;
             LoadLast();
-            _system.SelectionChanged += (s, e) => LockComments();
-            LockComments();
-        }
-
-        /// <summary>АПС: комментарий задан жёстко — по нему линия и журнал отбирают устройства.</summary>
-        private void LockComments()
-        {
-            bool aps = Value(_system) == "aps";
-            if (aps) _comments.Text = Core.DeviceMarkingOperations.ApsComment;
-            _comments.IsReadOnly = aps;
-            _comments.Background = aps ? System.Windows.SystemColors.ControlBrush : System.Windows.SystemColors.WindowBrush;
         }
 
         /// <summary>Подставляет значения последнего запуска; без файла окно остаётся пустым.</summary>
@@ -301,13 +299,10 @@ namespace PluginForRevit2022
                 Dictionary<string, string> last = MarkingSettings.ReadAccount().LastMarking;
                 Select(_system, last, "system");
                 Select(_order, last, "order");
-                Select(_standard, last, "standard");
                 Put(_building, last, "building");
                 Put(_controller, last, "controller");
-                Put(_bco, last, "bco");
                 Put(_line, last, "line");
                 Put(_comments, last, "comments");
-                Put(_floor, last, "floor");
                 Put(_start, last, "start");
             }
             catch (Exception)
@@ -324,13 +319,10 @@ namespace PluginForRevit2022
                 {
                     ["system"] = Value(_system),
                     ["order"] = Value(_order),
-                    ["standard"] = Value(_standard),
                     ["building"] = _building.Text,
                     ["controller"] = _controller.Text,
-                    ["bco"] = _bco.Text,
                     ["line"] = _line.Text,
                     ["comments"] = _comments.Text,
-                    ["floor"] = _floor.Text,
                     ["start"] = _start.Text,
                 });
             }
@@ -352,8 +344,23 @@ namespace PluginForRevit2022
             if (item != null) box.SelectedItem = item;
         }
 
+        private void UpdateFloorsState()
+        {
+            List<string> levels = LevelFloorsWindow.UnnumberedLevels(_doc).Select(l => l.Name).ToList();
+            int missing = levels.Count(l => MarkingSettings.LevelFloor(_doc, l) == null);
+            _floorsState.Text = levels.Count == 0 ? "Все уровни проекта с номером в имени."
+                : missing == 0 ? $"Этаж задан для всех уровней без номера ({levels.Count})."
+                : $"Не задан этаж уровней: {missing} из {levels.Count}. Устройства на них не разметятся.";
+        }
+
         private void Accept()
         {
+            if (Value(_system) == "aps" && string.IsNullOrWhiteSpace(_comments.Text))
+            {
+                MessageBox.Show(this, "Укажите «Комментарии» линии (например АПС): в маркировке участвуют только устройства и трассы с этим значением.", Title);
+                _comments.Focus();
+                return;
+            }
             if (!int.TryParse(_start.Text.Trim(), out int start))
             {
                 MessageBox.Show(this, "Начальный номер должен быть числом.", Title);
@@ -363,13 +370,10 @@ namespace PluginForRevit2022
             {
                 System = Value(_system),
                 Order = Value(_order),
-                ParameterStandard = Value(_standard),
                 Building = _building.Text,
                 Controller = _controller.Text,
-                Bco = _bco.Text,
                 Line = _line.Text,
                 Comments = _comments.Text,
-                Floor = _floor.Text,
                 StartNumber = start,
             };
             SaveLast();
@@ -388,6 +392,99 @@ namespace PluginForRevit2022
             }
             box.SelectedIndex = 0;
             return box;
+        }
+    }
+
+    /// <summary>Этажи уровней без номера в имени («Тех. пространство», «Кровля»): у каждого уровня свой номер этажа.</summary>
+    internal sealed class LevelFloorsWindow : Window
+    {
+        private readonly Document _doc;
+        private readonly List<(string level, TextBox box)> _rows = new List<(string, TextBox)>();
+
+        public static List<Level> UnnumberedLevels(Document doc) =>
+            new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l.Name ?? "", @"\d"))
+                .OrderBy(l => l.Elevation).ToList();
+
+        public LevelFloorsWindow(Document doc)
+        {
+            _doc = doc;
+            Title = "Этажи уровней без номера";
+            Width = 420;
+            SizeToContent = SizeToContent.Height;
+            MaxHeight = 640;
+            ResizeMode = ResizeMode.NoResize;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            var panel = new StackPanel { Margin = new Thickness(12) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "В имени этих уровней нет номера этажа. Укажите этаж числом — он запишется устройствам на уровне. Пустое поле — этаж не задан. Значения запоминаются для этого проекта."
+                       + (string.IsNullOrEmpty(doc.PathName) ? " Проект ещё не сохранён: значения привяжутся к его временному имени — сохраните проект и задайте их заново." : ""),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            var grid = new System.Windows.Controls.Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+            List<Level> levels = UnnumberedLevels(doc);
+            foreach (Level level in levels)
+            {
+                int row = grid.RowDefinitions.Count;
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                var name = new TextBlock
+                {
+                    Text = $"{level.Name}  ({level.Elevation * 0.3048:0.###} м)",
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Margin = new Thickness(0, 2, 8, 2),
+                };
+                var box = new TextBox { Text = MarkingSettings.LevelFloor(doc, level.Name) ?? "", Margin = new Thickness(0, 2, 0, 2), TextAlignment = TextAlignment.Right };
+                System.Windows.Controls.Grid.SetRow(name, row);
+                System.Windows.Controls.Grid.SetRow(box, row);
+                System.Windows.Controls.Grid.SetColumn(box, 1);
+                grid.Children.Add(name);
+                grid.Children.Add(box);
+                _rows.Add((level.Name, box));
+            }
+            if (levels.Count == 0) panel.Children.Add(new TextBlock { Text = "В проекте нет уровней без номера в имени.", Foreground = System.Windows.Media.Brushes.DimGray });
+            panel.Children.Add(new ScrollViewer { Content = grid, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 460 });
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
+            var save = new Button { Content = "Сохранить", IsDefault = true, Padding = new Thickness(12, 4, 12, 4) };
+            save.Click += (s, e) => Save();
+            var cancel = new Button { Content = "Отмена", IsCancel = true, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(8, 0, 0, 0) };
+            buttons.Children.Add(save);
+            buttons.Children.Add(cancel);
+            panel.Children.Add(buttons);
+            Content = panel;
+        }
+
+        private void Save()
+        {
+            var values = new Dictionary<string, string>();
+            foreach (var (level, box) in _rows)
+            {
+                string text = box.Text.Trim();
+                if (text.Length > 0 && !int.TryParse(text, out _))
+                {
+                    MessageBox.Show(this, $"Этаж уровня «{level}» должен быть целым числом (журнал не принимает этаж текстом).", Title);
+                    box.Focus();
+                    return;
+                }
+                values[level] = text;
+            }
+            var numbered = new FilteredElementCollector(_doc).OfClass(typeof(Level)).Cast<Level>()
+                .Select(l => System.Text.RegularExpressions.Regex.Match(l.Name ?? "", @"-?\d+"))
+                .Where(m => m.Success).Select(m => int.Parse(m.Value).ToString()).ToList();
+            List<string> clash = values.Where(v => v.Value.Length > 0 && numbered.Contains(int.Parse(v.Value).ToString())).Select(v => $"«{v.Key}» = {v.Value}").ToList();
+            if (clash.Count > 0 && MessageBox.Show(this,
+                    "Этот номер уже есть в имени другого уровня:\n" + string.Join("\n", clash) +
+                    "\n\nКабельный журнал по номеру этажа отнесёт устройства к уровню с этим номером в имени. Сохранить всё равно?",
+                    Title, MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            MarkingSettings.SaveLevelFloors(_doc, values);
+            DialogResult = true;
         }
     }
 }

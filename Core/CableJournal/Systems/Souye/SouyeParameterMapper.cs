@@ -51,5 +51,13 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                     break;
             }
         }
+
+        /// <summary>
+        /// RU: Стандарт задаёт параметр мощности; этаж — параметр из «Настроек маркировки» (если задан).
+        /// </summary>
+        public SouyeParameterMapper(SouyeParameterStandard standard, string floorParameter) : this(standard)
+        {
+            if (!string.IsNullOrWhiteSpace(floorParameter)) FloorParameterName = floorParameter.Trim();
+        }
     }
 }

@@ -52,6 +52,7 @@ namespace ARBM.CableJournalExporter.Services
                 .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                 .WhereElementIsNotElementType()
                 .OfType<FamilyInstance>()
+                .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                 .Where(c => (c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString() ?? "").Trim().StartsWith("ARK.", StringComparison.OrdinalIgnoreCase)) // АПС — «M2.ARK.3», не СОТС
                 .ToList();
 
@@ -121,6 +122,7 @@ namespace ARBM.CableJournalExporter.Services
                 .OfCategory(BuiltInCategory.OST_DataDevices)
                 .WhereElementIsNotElementType()
                 .OfType<FamilyInstance>()
+                .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                 .Where(d => Complete(d, reportIfPartial: true))
                 .ToList();
 
@@ -242,6 +244,7 @@ namespace ARBM.CableJournalExporter.Services
                 .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                 .WhereElementIsNotElementType()
                 .OfType<FamilyInstance>()
+                .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                 .Where(c =>
                 {
                     string comments = c.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
@@ -315,6 +318,7 @@ namespace ARBM.CableJournalExporter.Services
                 .OfCategory(BuiltInCategory.OST_DataDevices)
                 .WhereElementIsNotElementType()
                 .OfType<FamilyInstance>()
+                .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
                 .Where(d =>
                 {
                     string comments = d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();

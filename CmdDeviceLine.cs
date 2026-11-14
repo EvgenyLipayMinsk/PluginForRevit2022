@@ -22,18 +22,21 @@ namespace PluginForRevit2022
         };
         private readonly HashSet<long> _ids;
         private readonly bool _inside;
+        private readonly Func<Element, bool> _extra;
 
         /// <param name="ids">null — любые устройства.</param>
         /// <param name="inside">true — только из набора; false — только вне набора.</param>
-        public LineDeviceFilter(HashSet<long> ids = null, bool inside = true)
+        /// <param name="extra">Дополнительное условие (например, комментарий линии и галочка системы).</param>
+        public LineDeviceFilter(HashSet<long> ids = null, bool inside = true, Func<Element, bool> extra = null)
         {
             _ids = ids;
             _inside = inside;
+            _extra = extra;
         }
 
         public bool AllowElement(Element element) =>
             element is FamilyInstance && element.Category != null && Categories.Contains(RevitIds.IdOf(element.Category.Id)) &&
-            (_ids == null || _ids.Contains(RevitIds.IdOf(element.Id)) == _inside);
+            (_ids == null || _ids.Contains(RevitIds.IdOf(element.Id)) == _inside) && (_extra == null || _extra(element));
 
         public bool AllowReference(Reference reference, XYZ position) => false;
     }
@@ -79,6 +82,37 @@ namespace PluginForRevit2022
         }
     }
 
+    /// <summary>
+    /// Сортировка таблиц линий: по выбранному столбцу, а внутри — всегда система, корпус, прибор, линия (числом).
+    /// Иначе после сортировки по прибору линии 1 и 2 одного прибора шли бы вразнобой.
+    /// </summary>
+    internal static class LineTableSort
+    {
+        private static readonly string[] Natural = { "System", "Building", "ControllerOrder", "Controller", "LineOrder", "Line" };
+
+        public static void Attach(DataGrid table)
+        {
+            table.Sorting += (s, e) =>
+            {
+                e.Handled = true;
+                string key = e.Column.SortMemberPath;
+                var direction = e.Column.SortDirection == System.ComponentModel.ListSortDirection.Ascending
+                    ? System.ComponentModel.ListSortDirection.Descending : System.ComponentModel.ListSortDirection.Ascending;
+                foreach (DataGridColumn c in table.Columns) c.SortDirection = null;
+                e.Column.SortDirection = direction;
+                System.ComponentModel.ICollectionView view = System.Windows.Data.CollectionViewSource.GetDefaultView(table.ItemsSource);
+                if (view == null) return;
+                using (view.DeferRefresh())
+                {
+                    view.SortDescriptions.Clear();
+                    view.SortDescriptions.Add(new System.ComponentModel.SortDescription(key, direction));
+                    foreach (string n in Natural.Where(n => n != key))
+                        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(n, System.ComponentModel.ListSortDirection.Ascending));
+                }
+            };
+        }
+    }
+
     internal sealed class LinePickerWindow : Window
     {
         private readonly DataGrid _table = new DataGrid
@@ -104,17 +138,22 @@ namespace PluginForRevit2022
             MinWidth = 560;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-            foreach (var (header, property) in new[] { ("Система", "System"), ("Корпус", "Building"), ("Прибор", "Controller"), ("Линия", "Line"), ("Устройств", "Devices"), ("Занято", "Occupied") })
+            foreach (var (header, property, sort) in new[]
             {
-                _table.Columns.Add(new DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(property), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+                ("Система", "System", "System"), ("Корпус", "Building", "Building"), ("Прибор", "Controller", "ControllerOrder"),
+                ("Линия", "Line", "LineOrder"), ("Комментарии", "Comment", "Comment"), ("Устройств", "Devices", "Devices"), ("Занято", "Occupied", "Devices"),
+            })
+            {
+                _table.Columns.Add(new DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(property), SortMemberPath = sort, Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
             }
             _table.ItemsSource = lines;
-            _table.SelectedIndex = 0;
-            _table.MouseDoubleClick += (s, e) => Accept(false);
+            LineTableSort.Attach(_table);
+            // Без выбора по умолчанию: строка выбрана — работаем с ней, не выбрана — линию укажут кликом по устройству
+            _table.SelectedIndex = -1;
+            _table.MouseDoubleClick += (s, e) => { if (Selected != null) Accept(); };
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-            buttons.Children.Add(Action("Указать на плане", () => Accept(true)));
-            Button ok = Action("Далее", () => Accept(false));
+            Button ok = Action("Указать на плане", Accept);
             ok.IsDefault = true;
             buttons.Children.Add(ok);
 
@@ -133,7 +172,7 @@ namespace PluginForRevit2022
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition());
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var hint = new TextBlock { Text = "Выберите линию, с которой работаем.", Margin = new Thickness(0, 0, 0, 8) };
+            var hint = new TextBlock { Text = "Выберите линию в таблице и нажмите «Указать на плане». Если строку не выбирать, линию определит клик по любому её устройству на плане.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
             Grid.SetRow(_table, 1);
             Grid.SetRow(bottom, 2);
             layout.Children.Add(hint);
@@ -149,10 +188,9 @@ namespace PluginForRevit2022
             return button;
         }
 
-        private void Accept(bool pickOnPlan)
+        private void Accept()
         {
-            if (!pickOnPlan && Selected == null) return;
-            PickOnPlan = pickOnPlan;
+            PickOnPlan = Selected == null; // строка не выбрана — линию определит клик по устройству
             DialogResult = true;
         }
     }
@@ -174,20 +212,29 @@ namespace PluginForRevit2022
                 HashSet<long> members = DeviceLineOperations.MemberIds(doc, line.Key);
 
                 SessionWindows.Inform(atStart || atEnd ? "line-add-hint-edge" : "line-add-hint", Caption,
-                    atStart ? "Кликните новое устройство: оно встанет первым номером линии."
-                    : atEnd ? "Кликните новое устройство: оно встанет последним номером линии."
-                    : "Шаг 1: кликните устройство линии, после которого встанет новое.\n\nШаг 2: кликните новое устройство.");
+                    (atStart ? "Кликайте новые устройства по порядку: они встанут в начало линии."
+                    : atEnd ? "Кликайте новые устройства по порядку: они встанут в конец линии."
+                    : "Шаг 1: кликните устройство линии, после которого встанут новые.\n\nШаг 2: кликайте новые устройства по порядку.") +
+                    "\n\nКаждое выбранное устройство становится синим. Номера пойдут в порядке кликов. Чтобы закончить, нажмите Esc.");
                 long? after = atStart ? (long?)null
                     : atEnd ? DeviceLineOperations.LastMemberId(doc, line.Key)
                     : RevitIds.IdOf(uiDoc.Selection.PickObject(ObjectType.Element, new LineDeviceFilter(members), "Устройство линии, после которого вставить").ElementId);
-                long device = RevitIds.IdOf(uiDoc.Selection.PickObject(ObjectType.Element, new LineDeviceFilter(members, false), "Новое устройство").ElementId);
+                // Несколько устройств: клики по порядку, каждое кликнутое синее, Esc — конец
+                string lineComment = line.Comment ?? "";
+                string system = line.Key.StartsWith("aps|") ? "aps" : line.System == "СОУЭ" ? "souye" : "security";
+                MarkingSettings settings = MarkingSettings.Load();
+                // Кликнуть можно только то, что линия примет: с её «Комментарии» и с галочкой системы в настройках
+                Func<Element, bool> fits = e => (lineComment.Length == 0 || DeviceMarkingOperations.HasComment(e, lineComment))
+                                               && e is FamilyInstance fi && settings.IsInLine(fi.Symbol.FamilyName, system);
+                List<long> devices = CmdMarkDevices.PickInOrder(uiDoc, new LineDeviceFilter(members, false, fits));
+                if (devices.Count == 0) return Result.Cancelled;
 
-                Dictionary<string, object> preview = DeviceLineOperations.Add(doc, line.Key, after, device, true);
+                Dictionary<string, object> preview = DeviceLineOperations.Add(doc, line.Key, after, devices, true);
                 var warnings = (List<string>)preview["warnings"];
-                string text = $"Линия: {line.Title}\nНомер устройства: {preview["number"]}\nСдвинется номеров: {preview["shifted"]}\nЗанято адресов на линии: {preview["lineAddresses"]} из {preview["lineCapacity"]}" +
+                string text = $"Линия: {line.Title}\nДобавить устройств: {preview["added"]}\nНомера: {preview["numbers"]}\nСдвинется номеров: {preview["shifted"]}\nЗанято адресов на линии: {preview["lineAddresses"]} из {preview["lineCapacity"]}" +
                               (warnings.Count > 0 ? "\n\nВнимание:\n" + string.Join("\n", warnings) : "");
                 if (!SessionWindows.Confirm("line-add-confirm", Caption, text + "\n\nДобавить?")) return Result.Cancelled;
-                SessionWindows.Inform("line-add-result", Caption, (string)DeviceLineOperations.Add(doc, line.Key, after, device, false)["summary"]);
+                SessionWindows.Inform("line-add-result", Caption, (string)DeviceLineOperations.Add(doc, line.Key, after, devices, false)["summary"]);
                 return Result.Succeeded;
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)

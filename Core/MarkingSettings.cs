@@ -19,6 +19,20 @@ namespace PluginForRevit2022.Core
         public bool Security { get; set; }
         /// <summary>Семейство применяется в линиях СОУЭ.</summary>
         public bool Souye { get; set; }
+        /// <summary>Устройству заполняется ARBM_ЗКПС. null — по умолчанию: изоляторам и ИПР нет, остальным да.</summary>
+        public bool? Zkps { get; set; }
+
+        /// <summary>Галочка «ЗКПС» в окне настроек (с учётом умолчания).</summary>
+        [System.Web.Script.Serialization.ScriptIgnore]
+        public bool ZkpsOn
+        {
+            get => Zkps ?? ZkpsByDefault(Name);
+            set => Zkps = value;
+        }
+
+        /// <summary>Изоляторы шлейфа и ручные извещатели (ИПР) зоны контроля не обозначают — ЗКПС им не нужна.</summary>
+        public static bool ZkpsByDefault(string family) =>
+            !System.Text.RegularExpressions.Regex.IsMatch(family ?? "", @"Изолятор|ИЗ-1|ИПР|Извещатель_Ручной", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         public bool InSystem(string system)
         {
@@ -40,6 +54,8 @@ namespace PluginForRevit2022.Core
         public double SouyePercent { get; set; } = 40;
         /// <summary>Добавляется к каждой строке (кабельной линии) журнала, м.</summary>
         public double LineReserveM { get; set; }
+        /// <summary>Имя параметра этажа оповещателей СОУЭ. АПС и СОТС — всегда ADSK_Этаж (так требует их журнал).</summary>
+        public string FloorParameter { get; set; } = "ADSK_Этаж";
 
         public void Validate()
         {
@@ -59,6 +75,10 @@ namespace PluginForRevit2022.Core
         /// <summary>Последние значения окна маркировки.</summary>
         public Dictionary<string, string> LastMarking { get; set; } = new Dictionary<string, string>();
         public JournalSettings Journal { get; set; } = new JournalSettings();
+        /// <summary>Этажи уровней без номера в имени: «модель|уровень» → номер этажа.</summary>
+        public Dictionary<string, string> LevelFloors { get; set; } = new Dictionary<string, string>();
+        /// <summary>Комментарии рабочих наборов: «модель|набор» → комментарий.</summary>
+        public Dictionary<string, string> WorksetComments { get; set; } = new Dictionary<string, string>();
     }
 
     /// <summary>Запись в списке профилей этого компьютера.</summary>
@@ -182,10 +202,17 @@ namespace PluginForRevit2022.Core
         {
             try
             {
-                MarkingAccount account = new JavaScriptSerializer().Deserialize<MarkingAccount>(File.ReadAllText(path));
+                string json = File.ReadAllText(path);
+                MarkingAccount account = new JavaScriptSerializer().Deserialize<MarkingAccount>(json);
                 if (account?.Families == null) throw new FormatException("нет списка семейств");
                 if (account.LastMarking == null) account.LastMarking = new Dictionary<string, string>();
                 if (account.Journal == null) account.Journal = new JournalSettings();
+                if (account.LevelFloors == null) account.LevelFloors = new Dictionary<string, string>();
+                if (account.WorksetComments == null) account.WorksetComments = new Dictionary<string, string>();
+                // Профиль до «Параметра этажа»: выбор ЭОМ хранился в последней маркировке
+                if (json.IndexOf("\"FloorParameter\"", StringComparison.Ordinal) < 0
+                    && account.LastMarking.TryGetValue("standard", out string standard) && string.Equals(standard, "eom", StringComparison.OrdinalIgnoreCase))
+                    account.Journal.FloorParameter = "О_Этаж";
                 return account;
             }
             catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is FormatException)
@@ -217,6 +244,57 @@ namespace PluginForRevit2022.Core
             WriteFile(Current().FilePath, account);
         }
 
+        // ===================== Этажи уровней без номера =====================
+
+        private static string LevelKey(Document doc, string level) => Clashes.ElementIdJournal.ModelKey(doc) + "|" + (level ?? "").Trim();
+
+        // Кэш: маркировка спрашивает этаж для каждого устройства — файл профиля читается, только если он изменился
+        private static (string path, DateTime stamp, Dictionary<string, string> floors) _levelCache;
+        private static (string probe, string key) _modelKeyCache;
+
+        /// <summary>Номер этажа, заданный для уровня этого проекта (уровни без номера в имени: «Тех. пространство», «Кровля»).</summary>
+        public static string LevelFloor(Document doc, string level)
+        {
+            string path = Current().FilePath;
+            DateTime stamp = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+            if (_levelCache.floors == null || _levelCache.path != path || _levelCache.stamp != stamp)
+                _levelCache = (path, stamp, new Dictionary<string, string>(ReadAccount().LevelFloors));
+            string probe = doc.PathName + "|" + doc.Title;
+            if (_modelKeyCache.probe != probe) _modelKeyCache = (probe, Clashes.ElementIdJournal.ModelKey(doc));
+            string key = _modelKeyCache.key + "|" + (level ?? "").Trim();
+            return _levelCache.floors.TryGetValue(key, out string floor) && !string.IsNullOrWhiteSpace(floor) ? floor.Trim() : null;
+        }
+
+        /// <summary>Сохраняет этажи уровней проекта; пустое значение снимает переопределение.</summary>
+        public static void SaveLevelFloors(Document doc, Dictionary<string, string> floors)
+        {
+            MarkingAccount account = ReadAccount();
+            foreach (var pair in floors)
+            {
+                string key = LevelKey(doc, pair.Key);
+                if (string.IsNullOrWhiteSpace(pair.Value)) account.LevelFloors.Remove(key);
+                else account.LevelFloors[key] = pair.Value.Trim();
+            }
+            WriteFile(Current().FilePath, account);
+        }
+
+        // ===================== Комментарии рабочих наборов =====================
+
+        public static string WorksetComment(Document doc, string workset) =>
+            ReadAccount().WorksetComments.TryGetValue(LevelKey(doc, workset), out string c) && !string.IsNullOrWhiteSpace(c) ? c.Trim() : null;
+
+        public static void SaveWorksetComments(Document doc, Dictionary<string, string> comments)
+        {
+            MarkingAccount account = ReadAccount();
+            foreach (var pair in comments)
+            {
+                string key = LevelKey(doc, pair.Key);
+                if (string.IsNullOrWhiteSpace(pair.Value)) account.WorksetComments.Remove(key);
+                else account.WorksetComments[key] = pair.Value.Trim();
+            }
+            WriteFile(Current().FilePath, account);
+        }
+
         public static void SaveLastMarking(Dictionary<string, string> values)
         {
             MarkingAccount account = ReadAccount();
@@ -242,7 +320,7 @@ namespace PluginForRevit2022.Core
         public static JournalSettings CurrentJournal()
         {
             JournalSettings j = ReadAccount().Journal ?? new JournalSettings();
-            return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM };
+            return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM, FloorParameter = j.FloorParameter };
         }
 
         /// <summary>Запас на линию из профиля, м (добавляется к каждой строке журнала).</summary>
@@ -268,6 +346,10 @@ namespace PluginForRevit2022.Core
 
         public bool AnyInLine(string system) => _families.Values.Any(f => f.InSystem(system));
 
+        /// <summary>Заполнять ли ARBM_ЗКПС устройствам семейства.</summary>
+        public bool GetsZkps(string family) =>
+            _families.TryGetValue(family ?? "", out FamilySetting setting) ? setting.ZkpsOn : FamilySetting.ZkpsByDefault(family);
+
         public string BcoOf(string family) =>
             _families.TryGetValue(family ?? "", out FamilySetting setting) && !string.IsNullOrWhiteSpace(setting.Bco) ? setting.Bco.Trim() : null;
 
@@ -282,7 +364,7 @@ namespace PluginForRevit2022.Core
                 .Distinct(StringComparer.CurrentCultureIgnoreCase)
                 .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
                 .Select(n => saved._families.TryGetValue(n, out FamilySetting s)
-                    ? new FamilySetting { Name = n, Bco = s.Bco, Aps = s.Aps, Security = s.Security, Souye = s.Souye }
+                    ? new FamilySetting { Name = n, Bco = s.Bco, Aps = s.Aps, Security = s.Security, Souye = s.Souye, Zkps = s.Zkps }
                     : new FamilySetting { Name = n })
                 .ToList();
         }
@@ -302,12 +384,32 @@ namespace PluginForRevit2022.Core
                 .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
         }
 
+        /// <summary>Параметры проекта с «этаж» в имени (без учёта регистра): общие/параметры проекта и параметры устройств.</summary>
+        public static List<string> FloorParameters(Document doc)
+        {
+            var names = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
+            bool IsFloor(string n) => !string.IsNullOrEmpty(n) && n.IndexOf("этаж", StringComparison.CurrentCultureIgnoreCase) >= 0;
+            var categories = new List<BuiltInCategory> { BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices, BuiltInCategory.OST_NurseCallDevices };
+            var deviceCategories = new HashSet<long>(categories.Select(c => (long)c));
+            DefinitionBindingMapIterator it = doc.ParameterBindings.ForwardIterator();
+            while (it.MoveNext())
+            {
+                // Параметр экземпляра у категорий устройств: в параметр типа или чужой категории этаж не записать
+                if (!IsFloor(it.Key?.Name) || !(it.Current is InstanceBinding binding) || binding.Categories == null) continue;
+                if (binding.Categories.Cast<Category>().Any(c => deviceCategories.Contains(RevitIds.IdOf(c.Id)))) names.Add(it.Key.Name);
+            }
+            foreach (Element e in new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories)).WhereElementIsNotElementType().Take(300))
+                foreach (Parameter p in e.Parameters)
+                    if (!p.IsReadOnly && p.StorageType == StorageType.String && IsFloor(p.Definition?.Name)) names.Add(p.Definition.Name);
+            return names.OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+
         public static Dictionary<string, object> ToResult(Document doc) => new Dictionary<string, object>
         {
             ["profile"] = Current().Name,
             ["journal"] = ReadAccount().Journal,
             ["profiles"] = Profiles().Select(p => new Dictionary<string, object> { ["name"] = p.Name, ["file"] = p.FilePath, ["current"] = p.IsCurrent }).ToList(),
-            ["families"] = ForDocument(doc).Select(f => new Dictionary<string, object> { ["name"] = f.Name, ["bco"] = f.Bco, ["aps"] = f.Aps, ["security"] = f.Security, ["souye"] = f.Souye }).ToList(),
+            ["families"] = ForDocument(doc).Select(f => new Dictionary<string, object> { ["name"] = f.Name, ["bco"] = f.Bco, ["aps"] = f.Aps, ["security"] = f.Security, ["souye"] = f.Souye, ["zkps"] = f.ZkpsOn }).ToList(),
         };
 
         /// <summary>Обновляет только переданные семейства текущего профиля.</summary>

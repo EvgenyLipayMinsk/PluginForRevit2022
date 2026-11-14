@@ -133,7 +133,8 @@ namespace PluginForRevit2022.Core
             {
                 throw new ArgumentException("Для СОУЭ укажите parameterStandard: eom или adsk.");
             }
-            var mapper = new SouyeParameterMapper(standard == "eom" ? SouyeParameterStandard.Eom : SouyeParameterStandard.Adsk);
+            var mapper = new SouyeParameterMapper(standard == "eom" ? SouyeParameterStandard.Eom : SouyeParameterStandard.Adsk,
+                MarkingSettings.CurrentJournal().FloorParameter); // этаж — из «Настроек маркировки»
             var collected = new SouyeDataCollector(new SouyeElementParser(mapper)).Collect(doc, comments);
             if (!collected.IsSuccess)
             {

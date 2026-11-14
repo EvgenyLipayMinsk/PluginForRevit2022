@@ -74,6 +74,10 @@
       <HintPath>$(RevitInstallDir)\RevitAPI.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="AdWindows">
+      <HintPath>$(RevitInstallDir)\AdWindows.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="RevitAPIUI">
       <HintPath>$(RevitInstallDir)\RevitAPIUI.dll</HintPath>
       <Private>False</Private>
@@ -132,6 +136,7 @@
     <Compile Include="CmdSaveLog.cs" />
     <Compile Include="CmdDeviceLine.cs" />
     <Compile Include="CmdLineManager.cs" />
+    <Compile Include="CmdWorksetComments.cs" />
     <Compile Include="CmdMarkingSettings.cs" />
     <Compile Include="CmdPlaceDetectors.cs" />
     <Compile Include="CmdRemoveParameters.cs" />
@@ -173,6 +178,7 @@
     <Compile Include="Core\ExportOperations.cs" />
     <Compile Include="Core\ModelCheckOperations.cs" />
     <Compile Include="Core\DeviceLineOperations.cs" />
+    <Compile Include="Core\NestedCommentOperations.cs" />
     <Compile Include="Core\MarkingSettings.cs" />
     <Compile Include="Core\DetectorPlacementOperations.cs" />
     <Compile Include="Core\PluginParameterCheck.cs" />
@@ -235,6 +241,10 @@
       <DependentUpon>UserRemoveParameters.xaml</DependentUpon>
     </Compile>
     <Compile Include="UI\RibbonIcons.cs" />
+    <Compile Include="UI\TabLogo.cs" />
+    <EmbeddedResource Include="UI\aerbim-logo.png">
+      <LogicalName>PluginForRevit2022.aerbim-logo.png</LogicalName>
+    </EmbeddedResource>
     <Compile Include="UI\ClashNavigatorWindow.cs" />
     <Compile Include="CmdClashes.cs" />
     <Compile Include="Core\Clashes\NavisReport.cs" />

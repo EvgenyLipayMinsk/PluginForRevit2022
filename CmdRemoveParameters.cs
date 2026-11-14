@@ -33,6 +33,7 @@ namespace PluginForRevit2022
             List<Element> parameters = collector.OfClass(typeof(ParameterElement)).WhereElementIsNotElementType().ToList();
 
             UserRemoveParameters userRemoveParameters = new UserRemoveParameters(parameters, doc);
+            new System.Windows.Interop.WindowInteropHelper(userRemoveParameters).Owner = commandData.Application.MainWindowHandle;
 
             userRemoveParameters.ShowDialog();
             

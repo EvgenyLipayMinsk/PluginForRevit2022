@@ -47,11 +47,16 @@ namespace PluginForRevit2022.Core
         internal const string ParamGrouping = "ADSK_Группирование";
         internal const int LineCapacity = 250;
 
-        /// <summary>«Комментарии» устройства АПС. Без него устройство не входит в линию АПС (так же отбирает кабельный журнал),
-        /// даже если номера прибора и линии заполнены — например, модуль, размеченный вручную.</summary>
-        internal const string ApsComment = "АПС";
+        /// <summary>Параметр этажа устройства: СОУЭ — из «Настроек маркировки» (его же читает журнал СОУЭ), АПС и СОТС — ADSK_Этаж.</summary>
+        public static string FloorParameterOf(string system)
+        {
+            if (system != "souye") return "ADSK_Этаж";
+            string configured = MarkingSettings.CurrentJournal().FloorParameter;
+            return string.IsNullOrWhiteSpace(configured) ? "ADSK_Этаж" : configured.Trim();
+        }
 
-        public static bool HasApsComment(Element e) => HasComment(e, ApsComment);
+        /// <summary>«Комментарии» элемента без пробелов по краям.</summary>
+        public static string CommentOf(Element e) => e.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim() ?? "";
 
         /// <summary>«Комментарии» элемента равны заданному (без учёта регистра и пробелов по краям).</summary>
         public static bool HasComment(Element e, string comment) =>
@@ -76,7 +81,10 @@ namespace PluginForRevit2022.Core
                     "(например M2). Журнал не примет корпус с русскими буквами, даже если они выглядят как латинские.");
             }
             FamilyInstance controller = ResolveController(doc, request.ControllerElementId);
-            if (system == "aps") request.Comments = ApsComment; // жёстко: по нему журнал и правка линий отбирают устройства АПС
+            // Комментарий линии задаётся при маркировке (любой, например «АПС»). Для АПС обязателен: по нему линия
+            // и журнал отбирают устройства; без него номера прибора и линии не образуют линию
+            if (system == "aps" && string.IsNullOrWhiteSpace(request.Comments))
+                throw new ArgumentException("Укажите «Комментарии» линии (например АПС): в маркировке участвуют только устройства и трассы с этим значением.");
 
             List<FamilyInstance> devices = ResolveDevices(doc, request.Ids);
             var warnings = new List<string>();
@@ -102,11 +110,19 @@ namespace PluginForRevit2022.Core
                         throw new InvalidOperationException($"Ни у одного выбранного устройства нет «Комментарии» = «{comment}». Заполните его у устройств линии и повторите.");
                 }
             }
+            // БЦО задаётся в «Настройках маркировки». Чему не задано — маркировка не начинается (MCP может передать bco явно)
+            List<string> noBco = devices.Select(d => d.Symbol.FamilyName).Distinct()
+                .Where(f => string.IsNullOrWhiteSpace(settings.BcoOf(f)) && string.IsNullOrWhiteSpace(request.Bco)).ToList();
+            if (noBco.Count > 0)
+            {
+                throw new InvalidOperationException("Не задано БЦО в «Настройках маркировки» для семейств:\n" +
+                    string.Join("\n", noBco.Select(f => "• " + f)) +
+                    "\n\nОткройте «Маркировка» → «Настройки маркировки», задайте БЦО этим семействам и повторите маркировку.");
+            }
             string order = (request.Order ?? "manual").Trim().ToLowerInvariant();
             if (order != "route" && order != "snake" && order != "manual") throw new ArgumentException("order: manual, route или snake.");
 
-            string floorParam = system == "souye" && string.Equals(request.ParameterStandard, "eom", StringComparison.OrdinalIgnoreCase)
-                ? "О_Этаж" : "ADSK_Этаж";
+            string floorParam = FloorParameterOf(system);
             var changes = new List<Dictionary<string, object>>();
             var failures = new List<string>();
             var result = new Dictionary<string, object>();
@@ -130,7 +146,7 @@ namespace PluginForRevit2022.Core
                     var values = ValuesFor(system, request, number.ToString(), bco);
                     if (floor == null)
                     {
-                        failures.Add($"id {RevitIds.IdOf(device.Id)}: в имени уровня нет номера этажа — укажите этаж для уровней без номера (floor)");
+                        failures.Add($"id {RevitIds.IdOf(device.Id)}: в имени уровня нет номера этажа — задайте его в окне маркировки: «Этажи уровней без номера…»");
                     }
                     else
                     {
@@ -290,7 +306,7 @@ namespace PluginForRevit2022.Core
             string floor = int.TryParse(currentFloor, out int parsed) ? parsed.ToString() : FloorOf(doc, controller, r.Floor);
             if (floor == null)
             {
-                failures.Add($"прибор id {id}: у уровня прибора нет номера этажа в имени — укажите этаж для уровней без номера или заполните «{floorParam}» прибора");
+                failures.Add($"прибор id {id}: у уровня прибора нет номера этажа в имени — задайте его в «Этажи уровней без номера…» или заполните «{floorParam}» прибора");
             }
             else
             {
@@ -356,7 +372,7 @@ namespace PluginForRevit2022.Core
             return new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories))
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
                 .Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) && (system == "aps"
-                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim() && HasApsComment(e)
+                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim() && HasComment(e, r.Comments)
                     : Value(e, ParamAddress) == address && (system != "souye" || Value(e, ParamBuilding) == r.Building?.Trim())));
         }
 
@@ -410,7 +426,9 @@ namespace PluginForRevit2022.Core
             string level = (doc.GetElement(device.LevelId) as Level)?.Name;
             Match match = level == null ? Match.Empty : Regex.Match(level, @"-?\d+");
             if (match.Success) return int.Parse(match.Value).ToString();
-            return string.IsNullOrWhiteSpace(floorForUnnumbered) ? null : floorForUnnumbered.Trim();
+            // Уровень без номера: этаж, переданный явно (MCP floor), иначе из «Этажи уровней без номера» (окно маркировки)
+            if (!string.IsNullOrWhiteSpace(floorForUnnumbered)) return floorForUnnumbered.Trim();
+            return level == null ? null : MarkingSettings.LevelFloor(doc, level);
         }
 
         /// <summary>ARBM_ПСБ_Адрес устройства: СОТС — «прибор.шлейф», СОУЭ — номер шлейфа целым числом.</summary>

@@ -14,12 +14,18 @@ namespace PluginForRevit2022.Core
         public string Controller { get; set; }
         public string Line { get; set; }
         public int Devices { get; set; }
+        /// <summary>«Комментарии» линии, заданные при маркировке.</summary>
+        public string Comment { get; set; }
         public string Occupied => $"{Devices} из {DeviceMarkingOperations.LineCapacity}";
+        /// <summary>Номера прибора и линии числом — для сортировки (1, 3, 10, а не 1, 10, 3).</summary>
+        public int ControllerOrder => NumberOrder(Controller);
+        public int LineOrder => NumberOrder(Line);
+        internal static int NumberOrder(string value) => int.TryParse((value ?? "").Trim(), out int n) ? n : int.MaxValue;
         /// <summary>Диапазон номеров «1–24».</summary>
         public string Numbers { get; set; }
         /// <summary>Пропуски и повторы номеров, «нет», если номера идут подряд.</summary>
         public string Problems { get; set; }
-        /// <summary>Этажи устройств (ADSK_Этаж).</summary>
+        /// <summary>Этажи устройств (параметр этажа системы).</summary>
         public string Floors { get; set; }
         /// <summary>Линия переполнена или в номерах есть пропуски/повторы.</summary>
         public bool HasIssues { get; set; }
@@ -44,12 +50,13 @@ namespace PluginForRevit2022.Core
 
         // ===================== Линии проекта =====================
 
-        public static List<LineInfo> ListLines(Document doc)
+        /// <param name="withUncommented">Показать и устройства АПС без «Комментарии» (только для просмотра и удаления в «Диспетчере линий»).</param>
+        public static List<LineInfo> ListLines(Document doc, bool withUncommented = false)
         {
             var groups = new Dictionary<string, List<FamilyInstance>>();
             foreach (FamilyInstance device in AllDevices(doc))
             {
-                string key = KeyOf(device);
+                string key = KeyOf(device, withUncommented);
                 if (key == null || !int.TryParse(Read(device, Mark), out _)) continue;
                 if (!groups.TryGetValue(key, out List<FamilyInstance> list)) groups[key] = list = new List<FamilyInstance>();
                 list.Add(device);
@@ -67,7 +74,8 @@ namespace PluginForRevit2022.Core
                 if (missing > 0) problems.Add($"пропусков: {missing}");
                 if (repeated > 0) problems.Add($"повторов: {repeated}");
                 if (numbers.Count > DeviceMarkingOperations.LineCapacity) problems.Add("больше ёмкости");
-                List<string> floors = g.Value.Select(d => Read(d, "ADSK_Этаж")).Where(f => !string.IsNullOrEmpty(f)).Distinct()
+                string floorParam = DeviceMarkingOperations.FloorParameterOf(SystemOf(first));
+                List<string> floors = g.Value.Select(d => Read(d, floorParam)).Where(f => !string.IsNullOrEmpty(f)).Distinct()
                     .OrderBy(f => int.TryParse(f, out int n) ? n : int.MaxValue).ThenBy(f => f).ToList();
                 string[] address = (Read(first, Address) ?? "").Split('.');
                 bool aps = g.Key.StartsWith("aps|");
@@ -80,12 +88,14 @@ namespace PluginForRevit2022.Core
                     Controller = aps ? Read(first, Controller) : (address.Length > 1 ? address[0] : ""),
                     Line = aps ? Read(first, LineNumber) : (address.Length > 1 ? address[1] : address[0]),
                     Devices = g.Value.Count,
+                    Comment = DeviceMarkingOperations.CommentOf(first),
                     Numbers = min == max ? min.ToString() : $"{min}–{max}",
                     Problems = problems.Count == 0 ? "нет" : string.Join(", ", problems),
                     Floors = floors.Count == 0 ? "—" : string.Join(", ", floors),
                     HasIssues = problems.Count > 0,
                 };
-            }).OrderBy(l => l.System).ThenBy(l => l.Building).ThenBy(l => l.Controller).ThenBy(l => l.Line).ToList();
+            }).OrderBy(l => l.System).ThenBy(l => l.Building)
+              .ThenBy(l => l.ControllerOrder).ThenBy(l => l.Controller).ThenBy(l => l.LineOrder).ThenBy(l => l.Line).ToList();
         }
 
         public static Dictionary<string, object> ListLinesResult(Document doc) => new Dictionary<string, object>
@@ -93,18 +103,24 @@ namespace PluginForRevit2022.Core
             ["lines"] = ListLines(doc).Select(l => new Dictionary<string, object>
             {
                 ["line"] = l.Key, ["system"] = l.System, ["building"] = l.Building, ["controller"] = l.Controller,
-                ["number"] = l.Line, ["devices"] = l.Devices, ["capacity"] = DeviceMarkingOperations.LineCapacity,
+                ["number"] = l.Line, ["comment"] = l.Comment, ["devices"] = l.Devices, ["capacity"] = DeviceMarkingOperations.LineCapacity,
             }).ToList(),
         };
 
         /// <summary>Линия устройства: АПС — корпус, прибор и линия; СОТС и СОУЭ — адрес. БЦО не входит: оно бывает разным у семейств.</summary>
-        public static string KeyOf(Element device)
+        public static string KeyOf(Element device) => KeyOf(device, false);
+
+        /// <param name="withUncommented">АПС без «Комментарии» тоже даёт ключ (с пустым комментарием в конце) —
+        /// так «Диспетчер линий» показывает и снимает ручную разметку. Добавление и маркировка такие устройства не видят.</param>
+        public static string KeyOf(Element device, bool withUncommented)
         {
             string controller = Read(device, Controller), line = Read(device, LineNumber), address = Read(device, Address);
             if (!string.IsNullOrEmpty(controller) && !string.IsNullOrEmpty(line))
             {
-                // АПС — только с «Комментарии» = «АПС»: номера прибора и линии без него (модули, разметка вручную) линию не образуют
-                return DeviceMarkingOperations.HasApsComment(device) ? $"aps|{Read(device, Building)}|{controller}|{line}" : null;
+                // АПС — линия вместе с комментарием, заданным при маркировке: без «Комментарии» (модули, разметка вручную)
+                // номера прибора и линии линию не образуют; с другим комментарием — это другая линия
+                string comment = DeviceMarkingOperations.CommentOf(device);
+                return comment.Length == 0 && !withUncommented ? null : $"aps|{Read(device, Building)}|{controller}|{line}|{comment.ToUpperInvariant()}";
             }
             // СОУЭ: адрес — только номер шлейфа, поэтому в ключе корпус (шлейф 1 корпусов M1 и M2 — разные линии).
             // СОТС: адрес «прибор.шлейф», корпус обычно пуст.
@@ -125,7 +141,7 @@ namespace PluginForRevit2022.Core
         public static List<long> DeviceIdsOfLines(Document doc, IEnumerable<string> keys)
         {
             var set = new HashSet<string>(keys);
-            return AllDevices(doc).Where(d => { string k = KeyOf(d); return k != null && set.Contains(k); })
+            return AllDevices(doc).Where(d => { string k = KeyOf(d, true); return k != null && set.Contains(k); })
                 .Select(d => RevitIds.IdOf(d.Id)).ToList();
         }
 
@@ -147,10 +163,19 @@ namespace PluginForRevit2022.Core
         /// <summary>
         /// Вставляет устройство в линию: после afterId или, если он не задан, в начало линии. Следующие номера сдвигаются на 1.
         /// </summary>
-        public static Dictionary<string, object> Add(Document doc, string lineKey, long? afterId, long deviceId, bool dryRun)
+        public static Dictionary<string, object> Add(Document doc, string lineKey, long? afterId, long deviceId, bool dryRun) =>
+            Add(doc, lineKey, afterId, new List<long> { deviceId }, dryRun);
+
+        /// <summary>
+        /// Вставляет устройства в линию подряд, в порядке списка: после afterId или, если он не задан, в начало линии.
+        /// Следующие номера линии сдвигаются на число вставленных устройств.
+        /// </summary>
+        public static Dictionary<string, object> Add(Document doc, string lineKey, long? afterId, List<long> deviceIds, bool dryRun)
         {
-            if (afterId == deviceId) throw new ArgumentException("Устройства должны быть разными.");
-            FamilyInstance device = Instance(doc, deviceId);
+            List<long> ids = (deviceIds ?? new List<long>()).Distinct().ToList();
+            if (ids.Count == 0) throw new ArgumentException("Укажите устройства.");
+            if (afterId != null && ids.Contains(afterId.Value)) throw new ArgumentException("Устройство, после которого вставляем, не может быть среди новых.");
+            List<FamilyInstance> devices = ids.Select(id => Instance(doc, id)).ToList();
             FamilyInstance after = afterId == null ? null : Instance(doc, afterId.Value);
             string key = !string.IsNullOrWhiteSpace(lineKey) ? lineKey.Trim() : after != null ? KeyOf(after) : null;
             if (key == null) throw new ArgumentException("Укажите линию или устройство, после которого вставить.");
@@ -158,7 +183,8 @@ namespace PluginForRevit2022.Core
 
             List<LineMember> members = Members(doc, key);
             if (members.Count == 0) throw new InvalidOperationException("На выбранной линии нет размеченных устройств.");
-            if (members.Any(m => m.Device.Id == device.Id)) throw new InvalidOperationException("Это устройство уже на этой линии.");
+            FamilyInstance already = devices.FirstOrDefault(d => members.Any(m => m.Device.Id == d.Id));
+            if (already != null) throw new InvalidOperationException($"Устройство id {RevitIds.IdOf(already.Id)} уже на этой линии.");
 
             LineMember source = after == null
                 ? members.OrderBy(m => m.Number).First()
@@ -167,68 +193,80 @@ namespace PluginForRevit2022.Core
             int number = after == null ? source.Number : source.Number + 1;
 
             string system = SystemOf(anchor);
-            // Правило маркировки: в линию входит только устройство с её «Комментарии» (АПС — «АПС»)
-            string lineComment = system == "aps" ? DeviceMarkingOperations.ApsComment : anchor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim();
-            if (!string.IsNullOrEmpty(lineComment) && !DeviceMarkingOperations.HasComment(device, lineComment))
-                throw new InvalidOperationException($"У устройства нет «Комментарии» = «{lineComment}»: в линию оно не добавляется. Заполните комментарий и повторите.");
+            // Правило маркировки: в линию входят только устройства с её «Комментарии»
+            string lineComment = DeviceMarkingOperations.CommentOf(anchor);
             MarkingSettings settings = MarkingSettings.Load();
-            if (!settings.IsInLine(device.Symbol.FamilyName, system))
+            foreach (FamilyInstance device in devices)
             {
-                throw new InvalidOperationException($"У семейства «{device.Symbol.FamilyName}» нет галочки этой системы в настройках маркировки.");
+                if (!string.IsNullOrEmpty(lineComment) && !DeviceMarkingOperations.HasComment(device, lineComment))
+                    throw new InvalidOperationException($"У устройства id {RevitIds.IdOf(device.Id)} нет «Комментарии» = «{lineComment}»: в линию оно не добавляется. Заполните комментарий и повторите.");
+                if (!settings.IsInLine(device.Symbol.FamilyName, system))
+                    throw new InvalidOperationException($"У семейства «{device.Symbol.FamilyName}» нет галочки этой системы в настройках маркировки.");
+                if (string.IsNullOrWhiteSpace(settings.BcoOf(device.Symbol.FamilyName)))
+                    throw new InvalidOperationException($"Не задано БЦО семейства «{device.Symbol.FamilyName}» в «Настройках маркировки».");
             }
 
             var warnings = new List<string>();
-            if (KeyOf(device) != null) warnings.Add("устройство было на другой линии и будет перенесено; номера той линии не изменятся — в ней останется пропуск");
+            int moved = devices.Count(d => KeyOf(d) != null);
+            if (moved > 0) warnings.Add($"устройств с другой линии: {moved} — будут перенесены; номера той линии не изменятся — в ней останутся пропуски");
             List<LineMember> shifted = members.Where(m => m.Number >= number).ToList();
-            int occupied = members.Count + 1;
+            int occupied = members.Count + devices.Count;
             if (occupied > DeviceMarkingOperations.LineCapacity) warnings.Add($"на линии {occupied} адресов при ёмкости {DeviceMarkingOperations.LineCapacity}");
 
             var failures = new List<string>();
-            using (var transaction = new Transaction(doc, "AerBIM: добавить устройство в линию"))
+            using (var transaction = new Transaction(doc, devices.Count == 1 ? "AerBIM: добавить устройство в линию" : "AerBIM: добавить устройства в линию"))
             {
                 transaction.Start();
-                foreach (LineMember member in shifted) Set(member.Device, Mark, (member.Number + 1).ToString(), failures);
+                foreach (LineMember member in shifted) Set(member.Device, Mark, (member.Number + devices.Count).ToString(), failures);
 
-                foreach (string name in new[] { Building, Controller, LineNumber, Address })
+                string comments = anchor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
+                for (int i = 0; i < devices.Count; i++)
                 {
-                    // Как у линии, в том числе пустое: иначе оставшийся корпус переносимого устройства дал бы другой ключ линии
-                    string value = Read(anchor, name) ?? "";
-                    Parameter own = device.LookupParameter(name);
-                    if (own == null || own.IsReadOnly || (own.AsString() ?? "").Trim() == value) continue;
-                    Set(device, name, value, failures);
-                }
-                // Перенос из линии другой системы: её параметры очищаются, иначе устройство осталось бы на старой линии.
-                DeviceMarkingOperations.ClearForeign(device, system, failures);
-                Set(device, Bco, settings.BcoOf(device.Symbol.FamilyName) ?? Read(anchor, Bco) ?? "", failures);
-                Set(device, Mark, number.ToString(), failures);
-                foreach (string name in new[] { "ADSK_Этаж", "О_Этаж" })
-                {
-                    if (!string.IsNullOrEmpty(Read(anchor, name)))
+                    FamilyInstance device = devices[i];
+                    foreach (string name in new[] { Building, Controller, LineNumber, Address })
                     {
-                        Set(device, name, DeviceMarkingOperations.FloorOf(doc, device, null) ?? Read(anchor, name), failures);
+                        // Как у линии, в том числе пустое: иначе оставшийся корпус переносимого устройства дал бы другой ключ линии
+                        string value = Read(anchor, name) ?? "";
+                        Parameter own = device.LookupParameter(name);
+                        if (own == null || own.IsReadOnly || (own.AsString() ?? "").Trim() == value) continue;
+                        Set(device, name, value, failures);
                     }
-                }
-                string comments = system == "aps" ? DeviceMarkingOperations.ApsComment : anchor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
-                if (!string.IsNullOrEmpty(comments))
-                {
-                    string error = RevitText.TrySet(device.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS), "Комментарии", comments);
-                    if (error != null) failures.Add($"id {deviceId}, Комментарии: {error}");
+                    // Перенос из линии другой системы: её параметры очищаются, иначе устройство осталось бы на старой линии.
+                    DeviceMarkingOperations.ClearForeign(device, system, failures);
+                    Set(device, Bco, settings.BcoOf(device.Symbol.FamilyName), failures); // БЦО — только из «Настроек маркировки», как при маркировке
+                    Set(device, Mark, (number + i).ToString(), failures);
+                    foreach (string name in new[] { "ADSK_Этаж", DeviceMarkingOperations.FloorParameterOf(system) }.Distinct())
+                    {
+                        if (!string.IsNullOrEmpty(Read(anchor, name)))
+                        {
+                            Set(device, name, DeviceMarkingOperations.FloorOf(doc, device, null) ?? Read(anchor, name), failures);
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(comments))
+                    {
+                        string error = RevitText.TrySet(device.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS), "Комментарии", comments);
+                        if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, Комментарии: {error}");
+                    }
                 }
                 Finish(transaction, dryRun, failures);
             }
 
+            int last = number + devices.Count - 1;
+            string numbers = devices.Count == 1 ? $"номер {number}" : $"номера {number}–{last}";
             return new Dictionary<string, object>
             {
                 ["dryRun"] = dryRun,
                 ["line"] = key,
                 ["number"] = number,
+                ["numbers"] = devices.Count == 1 ? number.ToString() : $"{number}–{last}",
+                ["added"] = devices.Count,
                 ["shifted"] = shifted.Count,
                 ["lineAddresses"] = occupied,
                 ["lineCapacity"] = DeviceMarkingOperations.LineCapacity,
                 ["warnings"] = warnings,
                 ["summary"] = dryRun
-                    ? $"Предпросмотр: устройство получит номер {number}, сдвинется номеров: {shifted.Count}."
-                    : $"Устройство добавлено под номером {number}, сдвинуто номеров: {shifted.Count}. Отменить можно через Ctrl+Z.",
+                    ? $"Предпросмотр: устройств {devices.Count}, {numbers}, сдвинется номеров: {shifted.Count}."
+                    : $"Добавлено устройств: {devices.Count}, {numbers}, сдвинуто номеров: {shifted.Count}. Отменить можно через Ctrl+Z.",
             };
         }
 
@@ -239,11 +277,12 @@ namespace PluginForRevit2022.Core
         {
             if (ids == null || ids.Count == 0) throw new ArgumentException("Укажите устройства.");
             List<FamilyInstance> devices = ids.Distinct().Select(id => Instance(doc, id)).ToList();
-            FamilyInstance unmarked = devices.FirstOrDefault(d => KeyOf(d) == null);
+            // Ключ с линиями без комментария: снять можно и ручную разметку (из «Диспетчера линий»)
+            FamilyInstance unmarked = devices.FirstOrDefault(d => KeyOf(d, true) == null);
             if (unmarked != null) throw new InvalidOperationException($"Устройство id {RevitIds.IdOf(unmarked.Id)} не размечено: нет линии.");
             if (!string.IsNullOrWhiteSpace(lineKey))
             {
-                FamilyInstance foreign = devices.FirstOrDefault(d => KeyOf(d) != lineKey.Trim());
+                FamilyInstance foreign = devices.FirstOrDefault(d => KeyOf(d, true) != lineKey.Trim());
                 if (foreign != null) throw new InvalidOperationException($"Устройство id {RevitIds.IdOf(foreign.Id)} не на выбранной линии.");
             }
 
@@ -254,7 +293,7 @@ namespace PluginForRevit2022.Core
             using (var transaction = new Transaction(doc, "AerBIM: удалить устройство из линии"))
             {
                 transaction.Start();
-                foreach (IGrouping<string, FamilyInstance> line in devices.GroupBy(KeyOf))
+                foreach (IGrouping<string, FamilyInstance> line in devices.GroupBy(d => KeyOf(d, true)))
                 {
                     List<LineMember> members = Members(doc, line.Key);
                     List<int> removedNumbers = members.Where(m => removedIds.Contains(RevitIds.IdOf(m.Device.Id))).Select(m => m.Number).ToList();
@@ -330,7 +369,7 @@ namespace PluginForRevit2022.Core
             var result = new List<LineMember>();
             foreach (FamilyInstance device in AllDevices(doc))
             {
-                if (KeyOf(device) == key && int.TryParse(Read(device, Mark), out int number))
+                if (KeyOf(device, key.EndsWith("|")) == key && int.TryParse(Read(device, Mark), out int number))
                 {
                     result.Add(new LineMember { Device = device, Number = number });
                 }

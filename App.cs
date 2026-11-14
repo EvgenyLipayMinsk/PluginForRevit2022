@@ -25,6 +25,7 @@ namespace PluginForRevit2022
             // Лента в стиле Revit: линейные значки, главные команды — крупные, второстепенные — мелкие стопкой
             string tabName = "AerBIM Manager";
             application.CreateRibbonTab(tabName);
+            TabLogo.Attach(application, tabName); // логотип перед названием вкладки
             string asm = System.Reflection.Assembly.GetExecutingAssembly().Location;
 
             PushButtonData Button(string id, string text, string command, string icon, string tip, string details = null)
@@ -46,7 +47,10 @@ namespace PluginForRevit2022
                     "Добавить общие параметры из ФОП в проект (с привязкой к категориям) или в открытое семейство.",
                     "Выберите параметры, категории, тип или экземпляр и группу. Сначала «Предпросмотр», затем «Добавить». То же доступно ИИ через MCP (add_shared_parameters)."),
                 Button("Remove Parameters", "Удалить параметры", "GuardRemoveParameters", "removeParams",
-                    "Удалить параметры проекта: выберите их в списке."));
+                    "Удалить параметры проекта: выберите их в списке."),
+                Button("Workset Comments", "Комментарии по наборам", "GuardWorksetComments", "worksetComments",
+                    "Присвоить «Комментарии» элементам по рабочим наборам: каждому набору — своё значение (например АПС, АГПТ). Вложенные семейства получают комментарий родителя.",
+                    "Пустое поле — набор не трогается. По умолчанию меняются только пустые комментарии; другой комментарий заменяется, если включить «Перезаписывать». Перед записью — предпросмотр."));
             #endregion
 
             #region Кабельный журнал
@@ -77,7 +81,7 @@ namespace PluginForRevit2022
                 "Удаление снимает с устройств линии марку, адрес, номер линии и прибора, БЦО и «Комментарии»; этаж и ЗКПС остаются. Перед удалением показывается предпросмотр."));
             markingPanel.AddStackedItems(
                 Button("Добавить устройство", "Добавить устройство", "GuardAddDeviceToLine", "addDevice",
-                    "Вставить устройство в размеченную линию после выбранного; следующие номера сдвигаются."),
+                    "Вставить одно или несколько устройств в размеченную линию (клики по порядку, выбранные подсвечиваются синим, Esc — конец): после выбранного, в начало или в конец; следующие номера сдвигаются. Устройство должно иметь «Комментарии» линии."),
                 Button("Удалить устройство", "Удалить устройство", "GuardRemoveDeviceFromLine", "removeDevice",
                     "Снять маркировку с устройств и закрыть пропуски в номерах; этаж и ЗКПС остаются."),
                 Button("Настройки маркировки", "Настройки маркировки", "GuardMarkingSettings", "settings",
@@ -104,7 +108,7 @@ namespace PluginForRevit2022
             {
                 LargeImage = RibbonIcons.Large("help"),
                 Image = RibbonIcons.Small("help"),
-                ToolTip = "Что и в каком порядке сделать и какие параметры заполнить, чтобы получился кабельный журнал.",
+                ToolTip = "Что и в каком порядке сделать: кабельный журнал АПС, СОТС, СОУЭ и работа с коллизиями Navisworks.",
             };
             IList<RibbonItem> support = supportPanel.AddStackedItems(helpData,
                 Button("Сохранить лог", "Сохранить лог", "CmdSaveLog", "log",
@@ -119,6 +123,7 @@ namespace PluginForRevit2022
             {
                 help.AddPushButton(Button(id, text, command, "help", $"Инструкция: кабельный журнал {text}."));
             }
+            help.AddPushButton(Button("Инструкция коллизии", "Коллизии Navisworks", "CmdInstructionClashes", "help", "Инструкция: окно коллизий Navisworks."));
             #endregion
 
             #region MCP: соединение с ИИ-клиентом

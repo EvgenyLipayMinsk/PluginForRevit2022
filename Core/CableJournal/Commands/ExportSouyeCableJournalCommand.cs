@@ -149,9 +149,11 @@ namespace ARBM.CableJournalExporter.Commands
 
                 var parameterStandardDialog = new TaskDialog("Выбор стандарта параметров");
                 parameterStandardDialog.MainInstruction = "Выберите стандарт именования параметров для элементов СОУЭ:";
-                parameterStandardDialog.MainContent = 
-                    "ЭОМ — использует параметры ЭОМ_Мощность_Номинальная и О_Этаж\n\n" +
-                    "ADSK — использует параметры ADSK_Номинальная мощность и ADSK_Этаж";
+                string floorParameter = PluginForRevit2022.Core.MarkingSettings.CurrentJournal().FloorParameter;
+                parameterStandardDialog.MainContent =
+                    "ЭОМ — мощность из ЭОМ_Мощность_Номинальная\n\n" +
+                    "ADSK — мощность из ADSK_Номинальная мощность\n\n" +
+                    $"Этаж — из «{floorParameter}» (задаётся в «Настройках маркировки» → «Параметр этажа»).";
 
                 parameterStandardDialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "ЭОМ стандарт");
                 parameterStandardDialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "ADSK стандарт");
@@ -222,7 +224,7 @@ namespace ARBM.CableJournalExporter.Commands
                 cancelMonitor.SetCurrentOperation("CollectSouyeData");
 
                 // Создаем маппер параметров на основе выбранного стандарта
-                var parameterMapper = new SouyeParameterMapper(selectedStandard);
+                var parameterMapper = new SouyeParameterMapper(selectedStandard, floorParameter);
                 var parser = new SouyeElementParser(parameterMapper);
                 var collector = new SouyeDataCollector(parser);
                 // SouyeControllerWithLoops Data from collectResult

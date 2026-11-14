@@ -55,7 +55,10 @@ namespace PluginForRevit2022
             HeadersVisibility = DataGridHeadersVisibility.Column,
             CanUserAddRows = false,
         };
-        private readonly TextBlock _summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        private readonly TextBlock _summary = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        // Линии с разными «Комментарии» (системами) в одной таблице не смешиваются — показывается один комментарий
+        private readonly System.Windows.Controls.ComboBox _comment = new System.Windows.Controls.ComboBox { MinWidth = 140, Margin = new Thickness(6, 0, 12, 0) };
+        private bool _reloading;
         private readonly Button _select;
         private readonly Button _delete;
 
@@ -75,13 +78,16 @@ namespace PluginForRevit2022
             foreach (var (header, property, width) in new[]
             {
                 ("Система", "System", 70.0), ("Корпус", "Building", 70.0), ("Прибор", "Controller", 70.0), ("Линия", "Line", 60.0),
-                ("Устройств", "Occupied", 90.0), ("Номера", "Numbers", 80.0), ("Пропуски / повторы", "Problems", 170.0), ("Этажи", "Floors", 0.0),
+                ("Комментарии", "Comment", 90.0), ("Устройств", "Occupied", 90.0), ("Номера", "Numbers", 80.0), ("Пропуски / повторы", "Problems", 170.0), ("Этажи", "Floors", 0.0),
             })
             {
+                // Сортировка по клику на заголовок — числом
+                string sort = property == "Controller" ? "ControllerOrder" : property == "Line" ? "LineOrder" : property == "Occupied" ? "Devices" : property;
                 _table.Columns.Add(new DataGridTextColumn
                 {
                     Header = header,
                     Binding = new System.Windows.Data.Binding(property),
+                    SortMemberPath = sort,
                     Width = width > 0 ? new DataGridLength(width) : new DataGridLength(1, DataGridLengthUnitType.Star),
                 });
             }
@@ -92,10 +98,11 @@ namespace PluginForRevit2022
             issueStyle.Triggers.Add(trigger);
             _table.RowStyle = issueStyle;
             _table.SelectionChanged += (s, e) => UpdateButtons();
+            LineTableSort.Attach(_table);
             _table.MouseDoubleClick += (s, e) => SelectInModel();
 
             _select = Action("Выделить в модели", SelectInModel, "Закрыть окно и выделить устройства выбранных линий");
-            _delete = Action("Удалить линию…", DeleteLines, "Снять маркировку со всех устройств выбранных линий (с предпросмотром)");
+            _delete = Action("Удалить линию", DeleteLines, "Снять маркировку со всех устройств выбранных линий (с предпросмотром)");
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
             buttons.Children.Add(Action("Обновить", Reload, "Перечитать линии из модели"));
             buttons.Children.Add(_select);
@@ -104,13 +111,22 @@ namespace PluginForRevit2022
             close.IsCancel = true;
             buttons.Children.Add(close);
 
+            _comment.SelectionChanged += (s, e) => { if (!_reloading) Show(); };
+            var top = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var label = new TextBlock { Text = "Комментарии:", VerticalAlignment = VerticalAlignment.Center };
+            DockPanel.SetDock(label, Dock.Left);
+            DockPanel.SetDock(_comment, Dock.Left);
+            top.Children.Add(label);
+            top.Children.Add(_comment);
+            top.Children.Add(_summary);
+
             var layout = new Grid { Margin = new Thickness(12) };
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition());
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetRow(_table, 1);
             Grid.SetRow(buttons, 2);
-            layout.Children.Add(_summary);
+            layout.Children.Add(top);
             layout.Children.Add(_table);
             layout.Children.Add(buttons);
             Content = layout;
@@ -119,11 +135,32 @@ namespace PluginForRevit2022
 
         private List<LineInfo> Selected => _table.SelectedItems.OfType<LineInfo>().ToList();
 
+        private const string NoComment = "Без комментария";
+        private static string CommentKey(LineInfo l) => string.IsNullOrWhiteSpace(l.Comment) ? NoComment : l.Comment.Trim().ToUpperInvariant();
+        private List<LineInfo> _lines = new List<LineInfo>();
+
         private void Reload()
         {
-            List<LineInfo> lines = DeviceLineOperations.ListLines(_doc);
+            _lines = DeviceLineOperations.ListLines(_doc, true); // с ручной разметкой АПС без комментария — пункт «Без комментария»
+            // Список комментариев: самый частый первым; выбранный сохраняется при обновлении
+            string current = _comment.SelectedItem as string;
+            List<string> comments = _lines.GroupBy(CommentKey).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).Select(g => g.Key).ToList();
+            _reloading = true;
+            _comment.ItemsSource = comments;
+            _comment.SelectedItem = current != null && comments.Contains(current) ? current : comments.FirstOrDefault();
+            _comment.IsEnabled = comments.Count > 1;
+            _reloading = false;
+            Show();
+        }
+
+        /// <summary>Линии выбранного комментария.</summary>
+        private void Show()
+        {
+            foreach (DataGridColumn c in _table.Columns) c.SortDirection = null; // новый список — в исходном порядке
+            string comment = _comment.SelectedItem as string;
+            List<LineInfo> lines = _lines.Where(l => CommentKey(l) == comment).ToList();
             _table.ItemsSource = lines;
-            if (lines.Count == 0)
+            if (_lines.Count == 0)
             {
                 _summary.Text = "В проекте нет размеченных линий.";
             }
@@ -132,7 +169,9 @@ namespace PluginForRevit2022
                 string bySystem = string.Join("; ", lines.GroupBy(l => l.System)
                     .Select(g => $"{g.Key}: линий {g.Count()}, устройств {g.Sum(l => l.Devices)}"));
                 int issues = lines.Count(l => l.HasIssues);
-                _summary.Text = bySystem + (issues > 0 ? $". С пропусками, повторами или сверх ёмкости ({DeviceMarkingOperations.LineCapacity}): {issues} — подсвечены." : ".");
+                int other = _lines.Count - lines.Count;
+                _summary.Text = bySystem + (issues > 0 ? $". С пропусками, повторами или сверх ёмкости ({DeviceMarkingOperations.LineCapacity}): {issues} — подсвечены." : ".")
+                                + (other > 0 ? $" Линий с другими комментариями: {other}." : "");
             }
             UpdateButtons();
         }
@@ -142,7 +181,7 @@ namespace PluginForRevit2022
             bool any = _table.SelectedItems.Count > 0;
             _select.IsEnabled = any;
             _delete.IsEnabled = any;
-            _delete.Content = _table.SelectedItems.Count > 1 ? $"Удалить линии ({_table.SelectedItems.Count})…" : "Удалить линию…";
+            _delete.Content = _table.SelectedItems.Count > 1 ? $"Удалить линии ({_table.SelectedItems.Count})" : "Удалить линию";
         }
 
         private void SelectInModel()

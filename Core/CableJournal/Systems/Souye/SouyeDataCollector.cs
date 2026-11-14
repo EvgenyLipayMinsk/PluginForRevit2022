@@ -125,6 +125,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             var controllers = new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                 .WhereElementIsNotElementType()
+                .Where(e => !(e is FamilyInstance nested && nested.SuperComponent != null)) // вложенные семейства — часть родителя
                 .Where(e => SameComments(GetCommentsValue(e), commentsValue))
                 .ToList();
 
@@ -158,6 +159,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             return new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_NurseCallDevices)
                 .WhereElementIsNotElementType()
+                .Where(e => !(e is FamilyInstance nested && nested.SuperComponent != null)) // вложенные семейства — часть родителя
                 .Where(e => SameComments(GetCommentsValue(e), commentsValue))
                 .Select(e => _parser.ParseDevice(e))
                 .ToList();

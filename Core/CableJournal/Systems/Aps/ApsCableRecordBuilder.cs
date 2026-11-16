@@ -22,6 +22,7 @@ namespace ARBM.CableJournalExporter.Services
         private readonly LoggedRouteLengthCalculator _routeCalc; // logged wrapper
         private readonly Document _doc;
         private readonly double _correctionFactor;
+        private CableInstallationLengths _lastInstallation;
 
         // Current cancellation monitor for this Build execution (set in Build and used by ComputeLengthSmart)
         private CancellationMonitor _currentCancel;
@@ -169,6 +170,7 @@ namespace ARBM.CableJournalExporter.Services
                 Purpose = "Шлейф АПС",
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -208,6 +210,7 @@ namespace ARBM.CableJournalExporter.Services
                 Purpose = "Шлейф АПС",
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -247,6 +250,7 @@ namespace ARBM.CableJournalExporter.Services
                 Purpose = "Шлейф АПС",
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -274,6 +278,7 @@ namespace ARBM.CableJournalExporter.Services
             CancellationMonitor cancel = null)
         {
             isFallbackForLength = false;
+            _lastInstallation = null;
             double feet;
 
             if (cancel?.IsCancellationRequested == true)
@@ -301,6 +306,8 @@ namespace ARBM.CableJournalExporter.Services
                     double directFeet = ComputeLength(start, end);
                     return directFeet * 0.3048;
                 }
+
+                _lastInstallation = _routeCalc.Inner.LastRouteInstallation;
 
                 // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
                 if (_routeCalc.LastRouteBridged) isFallbackForLength = true;

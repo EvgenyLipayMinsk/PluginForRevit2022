@@ -21,6 +21,7 @@ namespace PluginForRevit2022.Core
         public string Comments { get; set; }
         /// <summary>СОУЭ: eom или adsk.</summary>
         public string ParameterStandard { get; set; }
+        public string Form { get; set; }
         public string TemplatePath { get; set; }
         public string SavePath { get; set; }
         public bool Overwrite { get; set; }
@@ -46,7 +47,17 @@ namespace PluginForRevit2022.Core
             {
                 throw new ArgumentException("Укажите comments — значение параметра «Комментарии» (например, АПС).");
             }
-            if (!string.IsNullOrWhiteSpace(request.TemplatePath))
+            string formName = (request.Form ?? "aerbim").Trim().ToLowerInvariant();
+            if (formName != "aerbim" && formName != "a3")
+                throw new ArgumentException("form: aerbim или a3.");
+            var form = formName == "a3" ? CableJournalForm.A3 : CableJournalForm.AerBim;
+            var exporter = new JournalFormExporter(form);
+            if (form == CableJournalForm.A3)
+            {
+                var validation = exporter.Validate(JournalFormExporter.BuiltInA3, new TemplateStructure());
+                if (!validation.IsValid) throw new ArgumentException(validation.Message);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.TemplatePath))
             {
                 ValidateTemplate(request.TemplatePath);
             }
@@ -78,13 +89,14 @@ namespace PluginForRevit2022.Core
 
             if (!request.DryRun)
             {
-                new ExcelExporter().ExportCableRecords(request.TemplatePath, request.SavePath, records);
+                exporter.ExportCableRecords(request.TemplatePath, request.SavePath, records);
             }
 
             return new Dictionary<string, object>
             {
                 ["dryRun"] = request.DryRun,
                 ["system"] = system,
+                ["form"] = formName,
                 ["records"] = records.Count,
                 ["fallbackLengths"] = records.Count(r => r.IsFallbackForLength),
                 ["sample"] = records.Take(20).Select(Row).ToList(),

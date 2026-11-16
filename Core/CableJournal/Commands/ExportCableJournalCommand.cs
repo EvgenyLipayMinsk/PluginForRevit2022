@@ -41,7 +41,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // ---------------------------------------------------------
                 // 2. Проверка структуры шаблона
                 // ---------------------------------------------------------
-                var validator = new TemplateValidator();
+                var validator = new JournalFormExporter(dialog.SelectedForm);
                 var expectedStructure = new TemplateStructure();
                 var validation = validator.Validate(templatePath, expectedStructure);
 
@@ -94,7 +94,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // ---------------------------------------------------------
                 // 6. Экспорт в Excel
                 // ---------------------------------------------------------
-                var exporter = new ExcelExporter();
+                var exporter = new JournalFormExporter(dialog.SelectedForm);
                 PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
                 exporter.ExportCableRecords(templatePath, savePath, records);
 

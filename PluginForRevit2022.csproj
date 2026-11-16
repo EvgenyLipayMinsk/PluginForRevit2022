@@ -283,6 +283,13 @@
   <ItemGroup>
     <None Include="Resourses\Remove Parameters.png" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Core\CableJournal\Services\JournalFormExporter.cs" />
+    <Compile Include="Core\CableJournal\Models\CableInstallation.cs" />
+    <EmbeddedResource Include="Resourses\CableJournal.A3.xlsx">
+      <LogicalName>PluginForRevit2022.CableJournal.A3.xlsx</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- Clear error instead of dozens of "type not found" errors when that Revit is not installed -->
   <Target Name="CheckRevitApi" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(RevitInstallDir)\RevitAPI.dll')">

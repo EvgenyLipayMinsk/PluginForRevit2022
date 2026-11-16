@@ -109,6 +109,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         {
             /// <summary>Длина сегмента в метрах.</summary>
             public double LengthMeters { get; set; }
+            public CableInstallationLengths InstallationLengths { get; set; }
 
             /// <summary>
             /// Флаг, указывающий, что длина была рассчитана с использованием fallback-метода
@@ -277,6 +278,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 Purpose       = PurposeValue,
                 Length        = FormatLength(segmentLengths[0].LengthMeters),
                 IsFallbackForLength = segmentLengths[0].IsFallbackForLength,
+                InstallationLengths = segmentLengths[0].InstallationLengths,
                 ColumnMap = new ExcelColumnMap()
             });
 
@@ -294,6 +296,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                     Purpose       = PurposeValue,
                     Length        = FormatLength(segmentLengths[i + 1].LengthMeters),
                     IsFallbackForLength = segmentLengths[i + 1].IsFallbackForLength,
+                    InstallationLengths = segmentLengths[i + 1].InstallationLengths,
                     ColumnMap = new ExcelColumnMap()
                 });
             }
@@ -395,6 +398,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 {
                     // Преобразуем из футов в метры, умножаем на коэффициент корректировки и округляем в большую сторону
                     result.LengthMeters = Math.Ceiling(lengthFeet * 0.3048 * _correctionFactor);
+                    result.InstallationLengths = _routeCalculator.Inner.LastRouteInstallation;
                     // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
                     if (_routeCalculator.LastRouteBridged) result.IsFallbackForLength = true;
                 }

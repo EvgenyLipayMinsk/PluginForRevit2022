@@ -46,6 +46,8 @@
         /// </summary>
         public string Length { get; set; }
 
+        public CableInstallationLengths InstallationLengths { get; set; }
+
         /// <summary>
         /// Indicates that the cable length was calculated using a fallback method
         /// instead of the primary route-based algorithm.

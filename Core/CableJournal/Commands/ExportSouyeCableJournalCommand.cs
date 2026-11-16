@@ -204,7 +204,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // BLOCK 5️⃣: Validate template structure
                 // =================================================================
 
-                var templateValidator = new TemplateValidator();
+                var templateValidator = new JournalFormExporter(fileDialog.SelectedForm);
                 var expectedStructure = new TemplateStructure();
                 var validationResult = templateValidator.Validate(templatePath, expectedStructure);
 
@@ -358,7 +358,7 @@ namespace ARBM.CableJournalExporter.Commands
 
                 cancelMonitor.SetCurrentOperation("ExportToExcel");
 
-                var exporter = new ExcelExporter();
+                var exporter = new JournalFormExporter(fileDialog.SelectedForm);
                 try
                 {
                     PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);

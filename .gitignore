@@ -365,3 +365,6 @@ FodyWeavers.xsd
 Installer/out/
 Installer/obj/
 Installer/bin/
+
+# Generated journals/PDFs contain project data; keep them local.
+/Exports/

@@ -1427,7 +1427,7 @@
     {
       "name": "export_cable_journal",
       "title": "Export cable journal",
-      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false also needs templatePath and savePath, writes the file and opens it. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running. Cable reserves come from the current settings profile.",
+      "description": "Builds a cable journal for a low-voltage system (security, aps, souye) from the open project: collects controllers and devices, calculates cable lengths along routes and writes an Excel file from a template. Non-interactive version of the ribbon commands: no dialogs, validation messages are returned in messages. dryRun=true (default) only calculates and returns the row count and a sample; dryRun=false needs savePath, writes the file and opens it. form=aerbim (default) also requires templatePath; form=a3 uses the built-in A3 СПС.КЖ form. A3 includes an editable Полный КЖ worksheet with all records; print worksheets reference its cells by formulas. The first A3 page has 44 records and a full title block; continuation pages have 49 records and a compact title block. Both layouts fill the A3 print area. Whole lengths have no trailing decimal separator; fractional edits are preserved. A3 start/end designations have no appended floor label. Installation lengths follow each route segment’s УГО Вид Засечки: В лотке goes to tray; Без засечки, В ПВХ-канале, В гибкой трубе and В жёсткой трубе go to concealed conduit. Correction, rounding and reserve are allocated proportionally so their sum equals design length. Virtual connections, direct fallback and missing parameters default to concealed conduit. Open conduit, riser and actual cable data stay blank. The last populated row on each print page has a thick black bottom border. Can take many minutes on large models and blocks Revit meanwhile; tell the designer before running. Cable reserves come from the current settings profile.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1455,9 +1455,15 @@
             ],
             "description": "souye only: parameter naming standard. Ask the designer."
           },
+          "form": {
+            "type": "string",
+            "enum": ["aerbim", "a3"],
+            "default": "aerbim",
+            "description": "Journal layout: aerbim = existing user template; a3 = built-in A3 СПС.КЖ form."
+          },
           "templatePath": {
             "type": "string",
-            "description": "Excel template path (.xlsx). Required when dryRun=false."
+            "description": "Excel template path (.xlsx). Required when dryRun=false and form=aerbim. Not used for form=a3."
           },
           "savePath": {
             "type": "string",

@@ -112,6 +112,7 @@ namespace PluginForRevit2022.Mcp
                 System = args.String("system"),
                 Comments = args.String("comments"),
                 ParameterStandard = args.String("parameterStandard"),
+                Form = args.String("form"),
                 TemplatePath = args.String("templatePath"),
                 SavePath = args.String("savePath"),
                 Overwrite = args.Bool("overwrite") ?? false,

@@ -249,7 +249,7 @@ namespace ARBM.CableJournalExporter.Commands
                 
                 // Создаём валидатор для проверки структуры шаблона
                 // EN: Create validator to check template structure
-                var validator = new TemplateValidator();
+                var validator = new JournalFormExporter(dialog.SelectedForm);
                 
                 // Определяем ожидаемую структуру шаблона (какие колонки, какие значения и т.д.)
                 // EN: Define the expected template structure (columns, values, etc.)
@@ -371,7 +371,7 @@ namespace ARBM.CableJournalExporter.Commands
                 
                 // Создаём экспортер для преобразования данных в Excel файл
                 // EN: Create exporter to convert data to Excel file
-                var exporter = new ExcelExporter();
+                var exporter = new JournalFormExporter(dialog.SelectedForm);
                 
                 // Выполняем экспорт:
                 // 1. Загружаем шаблон из templatePath

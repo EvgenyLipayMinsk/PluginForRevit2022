@@ -23,6 +23,7 @@ namespace ARBM.CableJournalExporter.Services
         private readonly RouteLengthCalculator _routeCalc;
         private readonly Document _doc;
         private readonly double _correctionFactor;
+        private CableInstallationLengths _lastInstallation;
         // private Dictionary<long, Graph> _graphsByLevel;
         // Кэш уровней (ElementId → Level)
         //private Dictionary<long, Level> _levelsById;
@@ -199,6 +200,7 @@ namespace ARBM.CableJournalExporter.Services
                 Purpose = "Шлейф СОТС",
                 Length = Math.Ceiling(ComputeLengthSmart(ctrl.Controller, device, null, out isFallbackForLength) * correctionFactor).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -219,6 +221,7 @@ namespace ARBM.CableJournalExporter.Services
                 Purpose = "Шлейф СОТС",
                 Length = Math.Ceiling(ComputeLengthSmart(d1, d2, null, out isFallbackForLength) * correctionFactor).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -241,6 +244,7 @@ namespace ARBM.CableJournalExporter.Services
                 Length = Math.Ceiling(ComputeLengthSmart(startElement, device, exp.ExpanderId.ToString(), out isFallbackForLength)
                 * correctionFactor).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
+                InstallationLengths = _lastInstallation,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -290,6 +294,7 @@ namespace ARBM.CableJournalExporter.Services
             out bool isFallbackForLength)
         {
             isFallbackForLength = false;
+            _lastInstallation = null;
             double feet;
 
             // DIRECT — по прямой
@@ -315,6 +320,8 @@ namespace ARBM.CableJournalExporter.Services
                     double directFeet = ComputeLength(start, end);
                     return directFeet * 0.3048;
                 }
+
+                _lastInstallation = _routeCalc.LastRouteInstallation;
 
                 // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
                 if (_routeCalc.LastRouteBridged) isFallbackForLength = true;

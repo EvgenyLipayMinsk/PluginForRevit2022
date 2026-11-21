@@ -19,20 +19,25 @@ namespace PluginForRevit2022.Core.Clashes
             "№", "Статус", "Комментарий", "Проверка / папка", "Наименование",
             "Эл. 1 ID", "Эл. 1 новый ID", "Эл. 1 ID объекта Navisworks", "Эл. 1 Категория", "Эл. 1 Файл",
             "Эл. 2 ID", "Эл. 2 новый ID", "Эл. 2 ID объекта Navisworks", "Эл. 2 Категория", "Эл. 2 Файл",
-            "Изменил", "Когда", "Отчёт",
+            "Изменил", "Когда", "Отчёт", "Скриншот",
         };
 
         /// <summary>Выгружает переданные коллизии (весь отчёт или только коллизии активной модели).</summary>
         public static void Write(List<ClashItem> items, string path)
         {
             ExcelPackage.License.SetNonCommercialPersonal("ARBM");
-            if (File.Exists(path)) File.Delete(path);
-            using (var package = new ExcelPackage(new FileInfo(path)))
+            using (var package = new ExcelPackage())
             {
                 Sheet(package, "Коллизии", items.Where(i => i.Status != ClashStatus.Fixed).ToList());
                 Sheet(package, "Исправлено", items.Where(i => i.Status == ClashStatus.Fixed).ToList());
                 Summary(package, items);
-                package.Save();
+                // Ошибка картинки или блокировка файла не должна уничтожать предыдущий отчёт.
+                byte[] bytes = package.GetAsByteArray();
+                using (var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
+                {
+                    stream.SetLength(0);
+                    stream.Write(bytes, 0, bytes.Length);
+                }
             }
         }
 
@@ -60,6 +65,46 @@ namespace PluginForRevit2022.Core.Clashes
                 row++;
             }
             Format(ws, Headers.Length, row - 1);
+            ws.Column(19).Width = 48;
+            if (items.Count > 0) ws.Cells[2, 1, row - 1, Headers.Length].Style.VerticalAlignment = ExcelVerticalAlignment.Top;
+            int imageRow = 2;
+            foreach (ClashItem item in items.OrderBy(i => i.Test).ThenBy(i => i.Group).ThenBy(i => Natural(i.Name)))
+                AddImage(ws, imageRow++, item);
+        }
+
+        private static void AddImage(ExcelWorksheet ws, int row, ClashItem item)
+        {
+            string path = item.EffectiveImagePath;
+            if (string.IsNullOrEmpty(path)) return;
+            if (!File.Exists(path))
+            {
+                ws.Cells[row, 19].Value = "Изображение не найдено";
+                return;
+            }
+            try
+            {
+                int width, height;
+                using (var source = Image.FromFile(path))
+                {
+                    double scale = Math.Min(320.0 / source.Width, 180.0 / source.Height);
+                    width = Math.Max(1, (int)Math.Round(source.Width * scale));
+                    height = Math.Max(1, (int)Math.Round(source.Height * scale));
+                }
+                var picture = ws.Drawings.AddPicture("Clash_" + row, new FileInfo(path));
+                picture.SetSize(width, height);
+                picture.SetPosition(row - 1, 6, 18, 6);
+                picture.EditAs = OfficeOpenXml.Drawing.eEditAs.OneCell;
+                ws.Row(row).Height = Math.Max(45, (height + 12) * 72.0 / 96);
+                ws.Cells[row, 3].Style.WrapText = true;
+                ws.Cells[row, 5].Style.WrapText = true;
+            }
+            catch (Exception ex)
+            {
+                if (ws.Drawings["Clash_" + row] != null) ws.Drawings.Remove("Clash_" + row);
+                ws.Cells[row, 19].Value = "Не удалось загрузить изображение. Вставьте новый скриншот.";
+                System.Diagnostics.Debug.WriteLine(ex.ToString());
+                ws.Cells[row, 19].Style.WrapText = true;
+            }
         }
 
         private static void Summary(ExcelPackage package, List<ClashItem> items)

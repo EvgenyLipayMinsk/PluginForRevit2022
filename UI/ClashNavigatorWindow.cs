@@ -71,6 +71,9 @@ namespace PluginForRevit2022.UI
         private readonly TextBlock _title = new TextBlock { FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         private readonly TextBlock _details = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6) };
         private readonly Image _image = new Image { MaxHeight = 220, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 6) };
+        private readonly Button _pasteScreenshot;
+        private readonly Button _removeScreenshot;
+        private readonly TextBlock _imageHint = new TextBlock { Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap };
         private readonly TextBox _comment = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 56, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         private readonly TextBlock _commentHint = new TextBlock { Foreground = Brushes.DimGray, Margin = new Thickness(0, 6, 0, 2) };
         private readonly TextBlock _state = new TextBlock { Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
@@ -225,6 +228,15 @@ namespace PluginForRevit2022.UI
             card.Children.Add(_title);
             card.Children.Add(_details);
             card.Children.Add(_image);
+            card.Children.Add(_imageHint);
+            var screenshots = new WrapPanel();
+            _pasteScreenshot = Btn("Вставить скрин из буфера", (s, e) => PasteScreenshot());
+            _pasteScreenshot.ToolTip = "Скопируйте изображение (например, Win+Shift+S) и вставьте его в выбранную коллизию. Ctrl+V вне поля комментария — вставить скрин.";
+            _removeScreenshot = Btn("Убрать скрин", (s, e) => ChangeScreenshot(null));
+            _removeScreenshot.ToolTip = "Убрать добавленный скриншот и показать исходную картинку Navisworks, если она есть.";
+            screenshots.Children.Add(_pasteScreenshot);
+            screenshots.Children.Add(_removeScreenshot);
+            card.Children.Add(screenshots);
             var statuses = new WrapPanel();
             foreach (ClashStatus s in ClashStatusText.All)
             {
@@ -261,7 +273,13 @@ namespace PluginForRevit2022.UI
 
         private void OnKey(object sender, KeyEventArgs e)
         {
-            if (_comment.IsKeyboardFocusWithin) return; // в комментарии стрелки — для текста
+            if (_comment.IsKeyboardFocusWithin) return; // в комментарии Ctrl+V и стрелки — для текста
+            if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                PasteScreenshot();
+                e.Handled = true;
+                return;
+            }
             if (e.Key == Key.Down || e.Key == Key.Right || e.Key == Key.PageDown) { Step(1); e.Handled = true; }
             else if (e.Key == Key.Up || e.Key == Key.Left || e.Key == Key.PageUp) { Step(-1); e.Handled = true; }
         }
@@ -336,11 +354,14 @@ namespace PluginForRevit2022.UI
             bool has = i != null;
             foreach (Button b in _statusButtons.Values) b.IsEnabled = has;
             _comment.IsEnabled = has;
+            _pasteScreenshot.IsEnabled = has;
+            _removeScreenshot.IsEnabled = has && !string.IsNullOrEmpty(i.ScreenshotPath);
             if (!has)
             {
                 _title.Text = _report.Items.Count == 0 ? "Отчёт не открыт" : (ModelFilterOn ? "В активной модели нет коллизий с таким статусом" : "Нет коллизий с таким статусом");
                 _details.Text = _report.Items.Count == 0 ? "Нажмите «Открыть отчёт…» и выберите HTML или XML, выгруженный из Navisworks (Clash Detective или точки обзора)." : "";
                 _image.Source = null;
+                _imageHint.Text = "";
                 _comment.Text = "";
                 _commentHint.Text = "";
                 _state.Text = "";
@@ -359,7 +380,7 @@ namespace PluginForRevit2022.UI
             if (!i.Item2.IsEmpty) lines.Add("Элемент 2: " + i.Item2);
             if (!string.IsNullOrEmpty(i.Description)) lines.Add("Описание: " + i.Description);
             _details.Text = string.Join("\n", lines);
-            _image.Source = LoadImage(i.ImagePath);
+            UpdateScreenshotUi(i);
             _comment.Text = i.Comment;
             UpdateStatusUi(i);
             if (fromSelection && !_noAutoShow && _autoShow.IsChecked == true) ShowSelected();
@@ -376,6 +397,46 @@ namespace PluginForRevit2022.UI
             }
             _commentHint.Text = i.Status == ClashStatus.Fake ? "Комментарий: почему коллизия фиктивная (по желанию)" : "Комментарий (по желанию)";
             _state.Text = string.IsNullOrEmpty(i.ChangedBy) ? "" : $"Статус изменил: {i.ChangedBy}, {i.ChangedAt}";
+        }
+
+        private void UpdateScreenshotUi(ClashItem item)
+        {
+            _image.Source = LoadImage(item.EffectiveImagePath);
+            bool custom = !string.IsNullOrEmpty(item.ScreenshotPath);
+            _removeScreenshot.IsEnabled = custom;
+            _imageHint.Text = string.IsNullOrEmpty(item.EffectiveImagePath) ? "Скриншот не добавлен" :
+                (_image.Source == null ? "Изображение не найдено или не читается. Вставьте новый скриншот." :
+                    (custom ? "Скриншот пользователя — войдёт в Excel" : "Картинка из отчёта Navisworks — войдёт в Excel"));
+        }
+
+        private void PasteScreenshot()
+        {
+            if (Selected == null) return;
+            try { ChangeScreenshot(ClashScreenshot.FromClipboard()); }
+            catch (Exception ex) { MessageBox.Show(this, "Не удалось вставить скриншот: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning); }
+        }
+
+        private void ChangeScreenshot(byte[] png)
+        {
+            ClashItem item = Selected;
+            if (item == null) return;
+            SaveComment();
+            string beforeBy = item.ChangedBy, beforeAt = item.ChangedAt;
+            try
+            {
+                string saved = ClashStatusStore.SetScreenshot(item, png);
+                _comment.Text = item.Comment;
+                UpdateStatusUi(item);
+                UpdateScreenshotUi(item);
+                _state.Text = (png == null ? "Скриншот убран." : "Скриншот сохранён и будет встроен в Excel.") +
+                    (saved.StartsWith(item.Source, StringComparison.OrdinalIgnoreCase) ? "" : " Папка отчёта только для чтения — сохранено в профиле пользователя.");
+            }
+            catch (Exception ex)
+            {
+                item.ChangedBy = beforeBy;
+                item.ChangedAt = beforeAt;
+                MessageBox.Show(this, "Скриншот не сохранён: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         private static BitmapImage LoadImage(string path)
@@ -429,7 +490,7 @@ namespace PluginForRevit2022.UI
         private void Touch(ClashItem i)
         {
             i.ChangedBy = string.IsNullOrWhiteSpace(_revitUser) ? Environment.UserName : _revitUser; // имя пользователя Revit
-            i.ChangedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            i.ChangedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
         }
 
         private void Persist(ClashItem i)

@@ -250,6 +250,7 @@
     <Compile Include="Core\Clashes\NavisReport.cs" />
     <Compile Include="Core\Clashes\ClashStatusStore.cs" />
     <Compile Include="Core\Clashes\ClashExcel.cs" />
+    <Compile Include="Core\Clashes\ClashScreenshot.cs" />
     <Compile Include="Core\Clashes\ElementIdJournal.cs" />
     <Compile Include="Core\Clashes\ClashRevit.cs" />
     <Compile Include="UI\AddSharedParametersWindow.xaml.cs">

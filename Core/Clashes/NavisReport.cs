@@ -80,6 +80,9 @@ namespace PluginForRevit2022.Core.Clashes
         public double CameraFocal;
         public double? ClipTop, ClipBottom;
         public string ImagePath;        // картинка из папки отчёта, если есть
+        public string ScreenshotPath;   // пользовательский скриншот, исходная картинка не меняется
+        public string ScreenshotAt = "";
+        public string EffectiveImagePath => string.IsNullOrEmpty(ScreenshotPath) ? ImagePath : ScreenshotPath;
 
         public ClashStatus Status = ClashStatus.New;
         public string Comment = "";

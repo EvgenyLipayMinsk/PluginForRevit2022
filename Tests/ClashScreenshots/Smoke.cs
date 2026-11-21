@@ -42,6 +42,7 @@ class Smoke
         try
         {
             output=args[0]; Directory.CreateDirectory(output);
+            ComparisonSmoke.Run();
             byte[] landscape=Image(640,360,220), portrait=Image(200,600,40);
             string source=Path.Combine(output,"report.html"); File.WriteAllText(source,"<html></html>");
             string original=Path.Combine(output,"original.png"); File.WriteAllBytes(original,landscape);

@@ -18,7 +18,7 @@ if (-not $graph.Success) { throw 'Production Graph class not found' }
 $unit = "using System;`nusing System.Collections.Generic;`nusing ARBM.CableJournalExporter.Models;`nnamespace ARBM.CableJournalExporter.Services { public class RouteLengthCalculator {`n" + $graph.Value + "`n} }"
 $graphSource = Join-Path $testOutput 'ProductionGraph.cs'
 Set-Content -LiteralPath $graphSource -Value $unit -Encoding UTF8
-& $csc /nologo /target:exe "/out:$testOutput\graph-smoke.exe" $graphSource "$PSScriptRoot\GraphSmoke.cs" "$root\Core\CableJournal\Models\CableInstallation.cs"
+& $csc /nologo /target:exe "/out:$testOutput\graph-smoke.exe" $graphSource "$PSScriptRoot\GraphSmoke.cs" "$root\Core\CableJournal\Models\CableInstallation.cs" "$root\Core\CableJournal\Models\RouteTraceSegment.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Graph test compilation failed' }
 & "$testOutput\graph-smoke.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Graph tests failed' }

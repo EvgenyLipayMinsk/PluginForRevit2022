@@ -251,6 +251,14 @@
     <Compile Include="Core\Clashes\ClashStatusStore.cs" />
     <Compile Include="Core\Clashes\ClashExcel.cs" />
     <Compile Include="Core\Clashes\ClashScreenshot.cs" />
+    <Compile Include="Core\DiagnosticFiles.cs" />
+    <Compile Include="Core\Clashes\ClashReportComparison.cs" />
+    <Compile Include="Core\ClashReportFileOperations.cs" />
+    <Compile Include="Core\ClashViewCaptureOperations.cs" />
+    <Compile Include="Core\CableDiagnosticsOperations.cs" />
+    <Compile Include="Core\JournalReviewOperations.cs" />
+    <Compile Include="Core\ProjectCheckOperations.cs" />
+    <Compile Include="Core\CableJournal\Models\RouteTraceSegment.cs" />
     <Compile Include="Core\Clashes\ElementIdJournal.cs" />
     <Compile Include="Core\Clashes\ClashRevit.cs" />
     <Compile Include="UI\AddSharedParametersWindow.xaml.cs">

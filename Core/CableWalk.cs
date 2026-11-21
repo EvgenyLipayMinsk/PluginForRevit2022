@@ -30,7 +30,7 @@ namespace PluginForRevit2022.Core
         /// <summary>Устройства в порядке обхода; reached — сколько устройств кабель от прибора нашёл.</summary>
         /// <param name="comment">Если задан — межэтажные переходы только с этими «Комментарии» (как трассы линии).</param>
         public static List<FamilyInstance> Order(Document doc, List<FamilyInstance> cables, FamilyInstance controller, List<FamilyInstance> devices,
-            out List<FamilyInstance> missed, out string problem, string comment = null)
+            out List<FamilyInstance> missed, out string problem, string comment = null, Dictionary<string, object> diagnostics = null)
         {
             missed = new List<FamilyInstance>();
             problem = null;
@@ -38,12 +38,13 @@ namespace PluginForRevit2022.Core
 
             // Отрезки кабеля по этажам
             var segments = new List<(XYZ a, XYZ b, long level)>();
+            var segmentIds = new List<long>();
             foreach (FamilyInstance cable in cables)
             {
                 if (!(cable.Location is LocationCurve curve)) continue;
                 IList<XYZ> points = curve.Curve.Tessellate();
                 long level = LevelOf(cable);
-                for (int i = 1; i < points.Count; i++) segments.Add((points[i - 1], points[i], level));
+                for (int i = 1; i < points.Count; i++) { segments.Add((points[i - 1], points[i], level)); segmentIds.Add(RevitIds.IdOf(cable.Id)); }
             }
             if (segments.Count == 0)
             {
@@ -196,6 +197,23 @@ namespace PluginForRevit2022.Core
                 stack.Push(NextOf(node));
             }
 
+            if (diagnostics != null)
+            {
+                var graphNodes = ends.SelectMany(e => new[] { e.a, e.b }).Concat(transitions).Concat(deviceNodes.Values).Concat(new[] { start }).Distinct().ToList();
+                var seen = new HashSet<Node>(); int components = 0;
+                foreach (var seed in graphNodes)
+                {
+                    if (!seen.Add(seed)) continue;
+                    components++; var queue = new Queue<Node>(); queue.Enqueue(seed);
+                    while (queue.Count > 0) foreach (var edge in queue.Dequeue().Next) if (seen.Add(edge.to)) queue.Enqueue(edge.to);
+                }
+                int Degree(Node n) => n.Next.Select(e => e.to).Distinct().Count();
+                object Point(Node n) => new { levelId = n.Level, xMm = n.Point.X * 304.8, yMm = n.Point.Y * 304.8, zMm = n.Point.Z * 304.8 };
+                diagnostics["components"] = components;
+                diagnostics["branchPoints"] = graphNodes.Where(n => Degree(n) > 2).Take(300).Select(Point).ToList();
+                diagnostics["openEnds"] = graphNodes.Where(n => n.Device == null && n != start && Degree(n) == 1).Take(300).Select(Point).ToList();
+                diagnostics["unreachableRouteIds"] = ends.Select((e, i) => new { e, i }).Where(x => !visited.Contains(x.e.a) || !visited.Contains(x.e.b)).Select(x => segmentIds[x.i]).Distinct().ToList();
+            }
             var inOrder = new HashSet<long>(order.Select(d => RevitIds.IdOf(d.Id)));
             missed = devices.Where(d => !inOrder.Contains(RevitIds.IdOf(d.Id))).ToList();
             return order;

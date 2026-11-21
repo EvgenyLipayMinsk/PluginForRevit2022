@@ -24,7 +24,7 @@ namespace PluginForRevit2022.Core.Clashes
         };
 
         /// <summary>Выгружает переданные коллизии (весь отчёт или только коллизии активной модели).</summary>
-        public static void Write(List<ClashItem> items, string path)
+        public static void Write(List<ClashItem> items, string path, bool overwrite = true)
         {
             ExcelPackage.License.SetNonCommercialPersonal("ARBM");
             using (var package = new ExcelPackage())
@@ -34,7 +34,7 @@ namespace PluginForRevit2022.Core.Clashes
                 Summary(package, items);
                 // Ошибка картинки или блокировка файла не должна уничтожать предыдущий отчёт.
                 byte[] bytes = package.GetAsByteArray();
-                using (var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
+                using (var stream = new FileStream(path, overwrite ? FileMode.OpenOrCreate : FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     stream.SetLength(0);
                     stream.Write(bytes, 0, bytes.Length);

@@ -110,6 +110,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             /// <summary>Длина сегмента в метрах.</summary>
             public double LengthMeters { get; set; }
             public CableInstallationLengths InstallationLengths { get; set; }
+            public double RawLengthMeters { get; set; }
+            public List<RouteTraceSegment> RouteTrace { get; set; }
 
             /// <summary>
             /// Флаг, указывающий, что длина была рассчитана с использованием fallback-метода
@@ -279,6 +281,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 Length        = FormatLength(segmentLengths[0].LengthMeters),
                 IsFallbackForLength = segmentLengths[0].IsFallbackForLength,
                 InstallationLengths = segmentLengths[0].InstallationLengths,
+                    RawLengthMeters = segmentLengths[0].RawLengthMeters,
+                    RouteTrace = segmentLengths[0].RouteTrace,
                 ColumnMap = new ExcelColumnMap()
             });
 
@@ -297,6 +301,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                     Length        = FormatLength(segmentLengths[i + 1].LengthMeters),
                     IsFallbackForLength = segmentLengths[i + 1].IsFallbackForLength,
                     InstallationLengths = segmentLengths[i + 1].InstallationLengths,
+                    RawLengthMeters = segmentLengths[i + 1].RawLengthMeters,
+                    RouteTrace = segmentLengths[i + 1].RouteTrace,
                     ColumnMap = new ExcelColumnMap()
                 });
             }
@@ -376,7 +382,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
 
             if (_mode == LengthMode.Direct)
             {
-                result.LengthMeters = Math.Ceiling(ComputeLength(from, to) * _correctionFactor);
+                result.RawLengthMeters = ComputeLength(from, to);
+                result.LengthMeters = Math.Ceiling(result.RawLengthMeters * _correctionFactor);
                 return result;
             }
 
@@ -392,13 +399,16 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 if (double.IsInfinity(lengthFeet))
                 {
                     result.IsFallbackForLength = true;
-                    result.LengthMeters = Math.Ceiling(ComputeLength(from, to) * _correctionFactor);
+                    result.RawLengthMeters = ComputeLength(from, to);
+                result.LengthMeters = Math.Ceiling(result.RawLengthMeters * _correctionFactor);
                 }
                 else
                 {
                     // Преобразуем из футов в метры, умножаем на коэффициент корректировки и округляем в большую сторону
                     result.LengthMeters = Math.Ceiling(lengthFeet * 0.3048 * _correctionFactor);
                     result.InstallationLengths = _routeCalculator.Inner.LastRouteInstallation;
+                    result.RawLengthMeters = lengthFeet * 0.3048;
+                    result.RouteTrace = _routeCalculator.Inner.LastRouteTrace;
                     // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
                     if (_routeCalculator.LastRouteBridged) result.IsFallbackForLength = true;
                 }

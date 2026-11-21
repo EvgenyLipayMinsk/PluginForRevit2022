@@ -47,6 +47,8 @@
         public string Length { get; set; }
 
         public CableInstallationLengths InstallationLengths { get; set; }
+        public double? RawLengthMeters { get; set; }
+        public System.Collections.Generic.List<RouteTraceSegment> RouteTrace { get; set; }
 
         /// <summary>
         /// Indicates that the cable length was calculated using a fallback method

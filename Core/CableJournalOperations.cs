@@ -72,20 +72,7 @@ namespace PluginForRevit2022.Core
 
             var timer = Stopwatch.StartNew();
             var messages = new List<string>();
-            List<CableRecord> records;
-            using (JournalDialog.Capture(messages))
-            using (var cancel = new TimeoutCancel())
-            {
-                records = Build(doc, system, request, cancel.Monitor, messages);
-            }
-
-            if (records == null || records.Count == 0)
-            {
-                throw new InvalidOperationException("Кабельный журнал не сформирован." +
-                    (messages.Count > 0 ? " " + string.Join(" | ", messages.Distinct().Take(10)) : " Нет подходящих элементов."));
-            }
-
-            MarkingSettings.ApplyLineReserve(records);
+            List<CableRecord> records = Calculate(doc, request, messages);
 
             if (!request.DryRun)
             {
@@ -108,6 +95,29 @@ namespace PluginForRevit2022.Core
                     ? $"Предпросмотр: строк журнала: {records.Count}. Для записи файла повторите с dryRun=false."
                     : $"Журнал сохранён: {request.SavePath}, строк: {records.Count}.",
             };
+        }
+
+        internal static List<CableRecord> Calculate(Document doc, CableJournalRequest request, List<string> messages)
+        {
+            string system = (request.System ?? "").Trim().ToLowerInvariant();
+            if (system != "aps" && system != "security" && system != "souye") throw new ArgumentException("system: aps, security, souye.");
+            if (system != "security" && string.IsNullOrWhiteSpace(request.Comments)) throw new ArgumentException("Укажите comments.");
+            List<CableRecord> records;
+            using (JournalDialog.Capture(messages))
+            using (var cancel = new TimeoutCancel())
+            {
+                records = Build(doc, system, request, cancel.Monitor, messages);
+            }
+
+            if (records == null || records.Count == 0)
+            {
+                throw new InvalidOperationException("Кабельный журнал не сформирован." +
+                    (messages.Count > 0 ? " " + string.Join(" | ", messages.Distinct().Take(10)) : " Нет подходящих элементов."));
+            }
+
+            MarkingSettings.ApplyLineReserve(records);
+
+            return records;
         }
 
         private static List<CableRecord> Build(Document doc, string system, CableJournalRequest request,

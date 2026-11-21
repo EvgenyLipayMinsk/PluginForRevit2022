@@ -1457,7 +1457,10 @@
           },
           "form": {
             "type": "string",
-            "enum": ["aerbim", "a3"],
+            "enum": [
+              "aerbim",
+              "a3"
+            ],
             "default": "aerbim",
             "description": "Journal layout: aerbim = existing user template; a3 = built-in A3 СПС.КЖ form."
           },
@@ -3719,6 +3722,437 @@
       "annotations": {
         "readOnlyHint": true
       }
+    },
+    {
+      "name": "check_cable_routes",
+      "title": "Check cable route connectivity",
+      "description": "Read-only connectivity check of marked lines using the same CableWalk graph as route-based marking: joins 100 mm, device attachment 600 mm, controller attachment 3 m, inter-floor transitions included. Returns unreachable devices and route IDs, graph components, branch coordinates and open ends. Branches/open ends are information, not automatically errors. Automatically resolves APS controllers; address-based security/SOUYE lines require an explicit line, controllerElementId and routeGrouping. Does not repair gaps or write ADSK_Этаж/ADSK_Группирование.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "string",
+            "description": "Exact marked-line key from list_marked_lines; omit to inspect all marked lines."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Optional exact Comments value to restrict devices."
+          },
+          "controllerElementId": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Explicit controller ID for one selected line. Needed when controller detection is ambiguous."
+          },
+          "routeGrouping": {
+            "type": "string",
+            "description": "Exact ADSK_Группирование of routes. Required for address-based security/SOUYE lines."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "explain_cable_length",
+      "title": "Explain a journal cable length",
+      "description": "Recalculates the journal with the existing APS/security/SOUYE algorithm and explains one record by its 1-based export order: raw length, coefficient, rounded length, reserve, design total, installation allocation and actual graph segments with source route IDs. Virtual graph connections have no element ID. Fixed service lengths have no geometric trace. Graph coordinates are internal Revit mm. Can take many minutes and blocks Revit; tell the designer before running.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "system": {
+            "type": "string",
+            "enum": [
+              "aps",
+              "security",
+              "souye"
+            ],
+            "description": "System whose journal is recalculated using the existing exporter algorithm."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Comments filter. Required for aps and souye."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "eom",
+              "adsk"
+            ],
+            "description": "Required for souye; ask the designer which parameter standard is used."
+          },
+          "recordNumber": {
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "1-based row order, excluding the header, in Полный КЖ."
+          },
+          "segmentOffset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Trace pagination offset; the journal is recalculated on each call."
+          },
+          "segmentLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 200,
+            "description": "Maximum graph segments to return. segmentCount remains complete."
+          }
+        },
+        "required": [
+          "system"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "manage_clash_report",
+      "title": "Read/update/export Navisworks reports",
+      "description": "Work with Navisworks report files, without changing the Revit model. list returns stable keys and optional image paths with pagination. update changes status, changes.comment (empty string clears it) and optionally attaches imagePath or removes the custom screenshot; screenshots are never mandatory. export writes the existing Excel report with embedded screenshots immediately after Comment. dryRun=true previews update/export without file writes. UI cards already open in the plugin must be reopened to see external changes. Original report files are read-only inputs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reportPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full paths of Navisworks HTML/HTM/XML reports. Report sidecars and optional screenshots are read too."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "update",
+              "export"
+            ],
+            "description": "",
+            "default": "list"
+          },
+          "key": {
+            "type": "string",
+            "description": "Exact key returned by list; required for update."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "New",
+              "InWork",
+              "Passed",
+              "Fake",
+              "Fixed"
+            ],
+            "description": "list filter or new status for update."
+          },
+          "changes": {
+            "type": "object",
+            "properties": {
+              "comment": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "imagePath": {
+            "type": "string",
+            "description": "Optional existing bitmap to embed as the custom screenshot."
+          },
+          "removeScreenshot": {
+            "type": "boolean",
+            "default": false,
+            "description": "Remove only the custom screenshot; restore original Navisworks image if any."
+          },
+          "savePath": {
+            "type": "string",
+            "description": "Target .xlsx, required for export."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow replacement of an existing output file."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preview by default. false explicitly saves files/statuses; never changes model elements."
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 10000000,
+            "description": "list offset"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 300,
+            "description": "Maximum returned items"
+          }
+        },
+        "required": [
+          "reportPaths"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "capture_clash_view",
+      "title": "Capture a Revit view for a clash",
+      "description": "Exports the current or specified graphical Revit view to PNG and optionally attaches it to a Navisworks clash. The view is temporarily opened through ViewSession and restored. Does not position a clash or change model elements. Pass reportPaths+key to attach, savePath to save standalone, or both. dryRun=true only validates and previews. An optional screenshot is never required for status/comment/Excel operations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "view": {
+            "type": "string",
+            "description": "View ID or exact name; omit for active view."
+          },
+          "reportPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full paths of Navisworks HTML/HTM/XML reports. Report sidecars and optional screenshots are read too."
+          },
+          "key": {
+            "type": "string",
+            "description": "Clash key when attaching to a report."
+          },
+          "savePath": {
+            "type": "string",
+            "description": "Optional standalone .png path."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow replacement of an existing output file."
+          },
+          "pixelSize": {
+            "type": "integer",
+            "default": 1600,
+            "minimum": 320,
+            "maximum": 4096,
+            "description": "Maximum export pixel dimension"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preview by default. false explicitly saves files/statuses; never changes model elements."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "compare_clash_reports",
+      "title": "Compare two Navisworks report revisions",
+      "description": "Read-only comparison of older and newer report sets. Matches unique test+key, then optionally a unique unordered pair of Revit element IDs and model filenames within the same test. Ambiguous repeated pairs are reported and are not guessed. Returns new, disappeared, common and changed statuses. Disappeared never automatically means Fixed. No model or report changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "beforePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full paths of Navisworks HTML/HTM/XML reports. Report sidecars and optional screenshots are read too."
+          },
+          "afterPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full paths of Navisworks HTML/HTM/XML reports. Report sidecars and optional screenshots are read too."
+          },
+          "matchElements": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also match unique element pairs when clash keys changed."
+          },
+          "limit": {
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 300,
+            "description": "Maximum rows returned per section; counts remain complete."
+          }
+        },
+        "required": [
+          "beforePaths",
+          "afterPaths"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "check_line_consistency",
+      "title": "Check marked line consistency",
+      "description": "Read-only check using existing dispatcher line keys: duplicate/invalid device numbers, numbering gaps, line capacity, empty Comments, missing/ambiguous APS controllers, unassigned device IDs and the existing project-wide APS journal-level check. line/comments restrict device-number checks; journalLevels explicitly covers the whole project. No re-marking or parameter writes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "string",
+            "description": "Exact marked-line key from list_marked_lines; omit to inspect all marked lines."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Optional exact Comments value to restrict devices."
+          },
+          "attachMm": {
+            "type": "number",
+            "minimum": 1,
+            "default": 600,
+            "description": "Attachment threshold used only by the existing journal-level check."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "compare_journal_with_model",
+      "title": "Compare an edited A3 journal against Revit",
+      "description": "Read-only comparison of an exported/edited A3 .xlsx Полный КЖ against a fresh model journal calculation. Checks endpoint matches, duplicate/ambiguous rows, missing/extra records, cable type/cores, design lengths, installation sums and distribution. Matching is by exact endpoint labels, so renamed devices appear missing/extra. Formula values are read from saved caches: recalculate and save in Excel first. Legacy AerBIM templates are not supported by this comparison. Large model calculation may take minutes and blocks Revit; tell the designer first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "system": {
+            "type": "string",
+            "enum": [
+              "aps",
+              "security",
+              "souye"
+            ],
+            "description": "System whose journal is recalculated using the existing exporter algorithm."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Comments filter. Required for aps and souye."
+          },
+          "parameterStandard": {
+            "type": "string",
+            "enum": [
+              "eom",
+              "adsk"
+            ],
+            "description": "Required for souye; ask the designer which parameter standard is used."
+          },
+          "journalPath": {
+            "type": "string",
+            "description": "Existing A3 .xlsx with Полный КЖ."
+          },
+          "lengthToleranceM": {
+            "type": "number",
+            "minimum": 0,
+            "default": 0.01,
+            "description": "Absolute numeric tolerance in metres."
+          }
+        },
+        "required": [
+          "system",
+          "journalPath"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "timeoutSeconds": 1800
+    },
+    {
+      "name": "run_project_checks",
+      "title": "Run selected project checks",
+      "description": "Runs selected existing/new read-only checks in one call. parameters only inspects definitions/bindings; it does not add parameters or require a fix. routes, lines, warnings and optional health return individual results/errors without preventing other checks. Default checks: parameters/routes/lines/warnings. Reports support scope/completeness limitations of each check. Does not certify regulatory compliance. Optional savePath writes detailed JSON or flattened XLSX only with dryRun=false; default performs checks without writing files.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "string",
+            "description": "Exact marked-line key from list_marked_lines; omit to inspect all marked lines."
+          },
+          "comments": {
+            "type": "string",
+            "description": "Optional exact Comments value to restrict devices."
+          },
+          "controllerElementId": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Explicit controller ID for one selected line. Needed when controller detection is ambiguous."
+          },
+          "routeGrouping": {
+            "type": "string",
+            "description": "Exact ADSK_Группирование of routes. Required for address-based security/SOUYE lines."
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "parameters",
+                "routes",
+                "lines",
+                "warnings",
+                "health"
+              ]
+            },
+            "description": "Checks to run; omit for default set."
+          },
+          "savePath": {
+            "type": "string",
+            "description": "Optional .json or .xlsx result file."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Allow replacement of an existing output file."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preview by default. false explicitly saves files/statuses; never changes model elements."
+          },
+          "attachMm": {
+            "type": "number",
+            "minimum": 1,
+            "default": 600
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "timeoutSeconds": 600
     }
   ]
 }

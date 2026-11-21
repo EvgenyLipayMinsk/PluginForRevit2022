@@ -91,6 +91,7 @@ namespace ARBM.CableJournalExporter.Services
                 public double Length;
 
                 public CableInstallation Installation;
+                public long RouteElementId;
             }
 
             private readonly List<Node> _nodes = new List<Node>();
@@ -123,10 +124,10 @@ namespace ARBM.CableJournalExporter.Services
             /// </summary>
             /// <param name="a">The first endpoint node.</param>
             /// <param name="b">The second endpoint node.</param>
-            public Edge AddEdge(Node a, Node b, CableInstallation installation = CableInstallation.Concealed)
+            public Edge AddEdge(Node a, Node b, CableInstallation installation = CableInstallation.Concealed, long routeElementId = 0)
             {
                 double len = a.Point.DistanceTo(b.Point);
-                var e = new Edge { A = a, B = b, Length = len, Installation = installation };
+                var e = new Edge { A = a, B = b, Length = len, Installation = installation, RouteElementId = routeElementId };
                 a.Edges.Add(e);
                 b.Edges.Add(e);
                 _edges.Add(e);
@@ -187,10 +188,13 @@ namespace ARBM.CableJournalExporter.Services
             /// либо <c>double.PositiveInfinity</c>, если путь отсутствует.</para>
             /// </returns>
             public CableInstallationLengths LastPathInstallation { get; private set; }
+            public List<RouteTraceSegment> LastPathTrace { get; private set; } = new List<RouteTraceSegment>();
 
             public double FindShortestPath(Node start, Node end)
             {
                 LastPathInstallation = null;
+                LastPathTrace = new List<RouteTraceSegment>();
+                var previous = new Dictionary<Node, (Node node, Edge edge)>();
                 var installations = new Dictionary<Node, CableInstallationLengths>();
                 installations[start] = new CableInstallationLengths(0, 0);
                 // Создаём словарь расстояний от стартового узла до всех остальных.
@@ -247,6 +251,20 @@ namespace ARBM.CableJournalExporter.Services
                     if (node == end)
                     {
                         LastPathInstallation = installations[node];
+                        var current = end;
+                        while (current != start)
+                        {
+                            var step = previous[current];
+                            LastPathTrace.Add(new RouteTraceSegment
+                            {
+                                RouteElementId = step.edge.RouteElementId, LengthM = step.edge.Length * 0.3048,
+                                Installation = step.edge.Installation.ToString(),
+                                FromMm = new[] { step.node.Point.X * 304.8, step.node.Point.Y * 304.8, step.node.Point.Z * 304.8 },
+                                ToMm = new[] { current.Point.X * 304.8, current.Point.Y * 304.8, current.Point.Z * 304.8 },
+                            });
+                            current = step.node;
+                        }
+                        LastPathTrace.Reverse();
                         return d;
                     }
 
@@ -278,6 +296,7 @@ namespace ARBM.CableJournalExporter.Services
                             // Обновляем расстояние.
                             // EN: Update distance.
                             dist[next] = nd;
+                            previous[next] = (node, e);
                             var parts = installations[node];
                             installations[next] = new CableInstallationLengths(
                                 parts.Concealed + (e.Installation == CableInstallation.Concealed ? e.Length : 0),
@@ -1327,7 +1346,7 @@ namespace ARBM.CableJournalExporter.Services
 
                     // Добавляем ребро между узлами.
                     // EN: Add edge between nodes.
-                    graph.AddEdge(n1, n2, ReadInstallation(el));
+                    graph.AddEdge(n1, n2, ReadInstallation(el), PluginForRevit2022.Core.RevitIds.IdOf(el.Id));
                 }
             }
             // ✅ ВАЛИДАЦИЯ: трассы
@@ -1712,7 +1731,7 @@ namespace ARBM.CableJournalExporter.Services
                     var n1 = graph.AddNode(new XYZ(p1.X, p1.Y, z));
                     var n2 = graph.AddNode(new XYZ(p2.X, p2.Y, z));
 
-                    graph.AddEdge(n1, n2, ReadInstallation(el));
+                    graph.AddEdge(n1, n2, ReadInstallation(el), PluginForRevit2022.Core.RevitIds.IdOf(el.Id));
                 }
             }
 
@@ -1938,7 +1957,7 @@ namespace ARBM.CableJournalExporter.Services
                     var n1 = graph.AddNode(new XYZ(p1.X, p1.Y, z));
                     var n2 = graph.AddNode(new XYZ(p2.X, p2.Y, z));
 
-                    graph.AddEdge(n1, n2, ReadInstallation(el));
+                    graph.AddEdge(n1, n2, ReadInstallation(el), PluginForRevit2022.Core.RevitIds.IdOf(el.Id));
                 }
             }
 
@@ -2299,6 +2318,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
             Graph.Node bestA = null;
             Graph.Node bestB = null;
             CableInstallation bestInstallation = CableInstallation.Concealed;
+            long bestRouteElementId = 0;
 
             // Перебираем все узлы графа.
             // EN: Iterate through all nodes in the graph.
@@ -2360,6 +2380,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         bestA = edge.A;
                         bestB = edge.B;
                         bestInstallation = edge.Installation;
+                        bestRouteElementId = edge.RouteElementId;
                     }
                 }
             }
@@ -2372,7 +2393,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                 // EN: If device is very close to edge — connect directly.
                 if (bestDist < tol)
                 {
-                    graph.AddEdge(deviceNode, bestA, bestInstallation);
+                    graph.AddEdge(deviceNode, bestA, bestInstallation, bestRouteElementId);
                 }
                 else
                 {
@@ -2386,8 +2407,8 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
                     // Соединяем проекцию с концами исходного ребра.
                     // EN: Connect projection → original edge endpoints.
-                    graph.AddEdge(projNode, bestA, bestInstallation);
-                    graph.AddEdge(projNode, bestB, bestInstallation);
+                    graph.AddEdge(projNode, bestA, bestInstallation, bestRouteElementId);
+                    graph.AddEdge(projNode, bestB, bestInstallation, bestRouteElementId);
                 }
             }
 
@@ -2716,12 +2737,12 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                             foreach (var n in ordered)
                             {
                                 if (!EdgeExists(prev, n))
-                                    graph.AddEdge(prev, n, edge.Installation);
+                                    graph.AddEdge(prev, n, edge.Installation, edge.RouteElementId);
                                 prev = n;
                             }
 
                             if (!EdgeExists(prev, edge.B))
-                                graph.AddEdge(prev, edge.B, edge.Installation);
+                                graph.AddEdge(prev, edge.B, edge.Installation, edge.RouteElementId);
 
                             changed = true;
                         }
@@ -2771,6 +2792,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
         /// Такая длина не по трассе: журнал помечает её как длину по прямой (жёлтым).
         /// </summary>
         public CableInstallationLengths LastRouteInstallation { get; private set; }
+        public List<RouteTraceSegment> LastRouteTrace { get; private set; }
 
         private static CableInstallation ReadInstallation(Element route)
         {
@@ -2794,6 +2816,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
         {
             LastRouteBridged = false;
             LastRouteInstallation = null;
+            LastRouteTrace = null;
             try
             {
                 // Проверяем, что стартовый элемент не null.
@@ -3076,6 +3099,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                     // Возвращаем результат.
                     // EN: Return computed distance.
                     LastRouteInstallation = graph.LastPathInstallation;
+                    LastRouteTrace = graph.LastPathTrace;
                     return result;
                 }
                 catch (Exception ex)
@@ -3223,8 +3247,8 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         // Разрезаем другое ребро на два.
                         // EN: Split the other edge into two.
                         graph.RemoveEdge(other);
-                        graph.AddEdge(other.A, projNode, other.Installation);
-                        graph.AddEdge(projNode, other.B, other.Installation);
+                        graph.AddEdge(other.A, projNode, other.Installation, other.RouteElementId);
+                        graph.AddEdge(projNode, other.B, other.Installation, other.RouteElementId);
 
                         // Соединяем исходную точку с проекцией.
                         // EN: Connect original endpoint to projection node.
@@ -3258,13 +3282,13 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
                         // Разрезаем первое ребро на два.
                         // EN: Split first edge.
-                        graph.AddEdge(e1.A, xNode, e1.Installation);
-                        graph.AddEdge(xNode, e1.B, e1.Installation);
+                        graph.AddEdge(e1.A, xNode, e1.Installation, e1.RouteElementId);
+                        graph.AddEdge(xNode, e1.B, e1.Installation, e1.RouteElementId);
 
                         // Разрезаем второе ребро на два.
                         // EN: Split second edge.
-                        graph.AddEdge(e2.A, xNode, e2.Installation);
-                        graph.AddEdge(xNode, e2.B, e2.Installation);
+                        graph.AddEdge(e2.A, xNode, e2.Installation, e2.RouteElementId);
+                        graph.AddEdge(xNode, e2.B, e2.Installation, e2.RouteElementId);
                     }
                 }
             }

@@ -23,6 +23,8 @@ namespace ARBM.CableJournalExporter.Services
         private readonly Document _doc;
         private readonly double _correctionFactor;
         private CableInstallationLengths _lastInstallation;
+        private double _lastRawLengthM;
+        private List<RouteTraceSegment> _lastTrace;
 
         // Current cancellation monitor for this Build execution (set in Build and used by ComputeLengthSmart)
         private CancellationMonitor _currentCancel;
@@ -171,6 +173,8 @@ namespace ARBM.CableJournalExporter.Services
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
                 InstallationLengths = _lastInstallation,
+                RawLengthMeters = _lastRawLengthM,
+                RouteTrace = _lastTrace,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -211,6 +215,8 @@ namespace ARBM.CableJournalExporter.Services
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
                 InstallationLengths = _lastInstallation,
+                RawLengthMeters = _lastRawLengthM,
+                RouteTrace = _lastTrace,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -251,6 +257,8 @@ namespace ARBM.CableJournalExporter.Services
                 Length = Math.Ceiling(lengthMeters).ToString("F2"),
                 IsFallbackForLength = isFallbackForLength,
                 InstallationLengths = _lastInstallation,
+                RawLengthMeters = _lastRawLengthM,
+                RouteTrace = _lastTrace,
                 ColumnMap = new ExcelColumnMap()
             };
         }
@@ -279,6 +287,8 @@ namespace ARBM.CableJournalExporter.Services
         {
             isFallbackForLength = false;
             _lastInstallation = null;
+            _lastRawLengthM = 0;
+            _lastTrace = null;
             double feet;
 
             if (cancel?.IsCancellationRequested == true)
@@ -287,7 +297,7 @@ namespace ARBM.CableJournalExporter.Services
             if (_mode == LengthMode.Direct)
             {
                 feet = ComputeLength(start, end);
-                return feet * 0.3048;
+                return _lastRawLengthM = feet * 0.3048;
             }
 
             if (_mode == LengthMode.Route)
@@ -304,14 +314,15 @@ namespace ARBM.CableJournalExporter.Services
                 {
                     isFallbackForLength = true;
                     double directFeet = ComputeLength(start, end);
-                    return directFeet * 0.3048;
+                    return _lastRawLengthM = directFeet * 0.3048;
                 }
 
                 _lastInstallation = _routeCalc.Inner.LastRouteInstallation;
+                _lastTrace = _routeCalc.Inner.LastRouteTrace;
 
                 // Путь найден только через «мост» между разрывами трасс — длина не по трассе.
                 if (_routeCalc.LastRouteBridged) isFallbackForLength = true;
-                return feet * 0.3048;
+                return _lastRawLengthM = feet * 0.3048;
             }
 
             return 0;

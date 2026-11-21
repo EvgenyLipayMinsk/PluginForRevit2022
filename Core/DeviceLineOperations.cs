@@ -357,7 +357,7 @@ namespace PluginForRevit2022.Core
             }
         }
 
-        private static IEnumerable<FamilyInstance> AllDevices(Document doc)
+        internal static IEnumerable<FamilyInstance> AllDevices(Document doc)
         {
             var categories = new List<BuiltInCategory> { BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices, BuiltInCategory.OST_NurseCallDevices };
             return new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories))

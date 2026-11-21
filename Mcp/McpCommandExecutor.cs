@@ -20,6 +20,14 @@ namespace PluginForRevit2022.Mcp
         static McpCommandExecutor()
         {
             Register("ping", Ping);
+            Register("check_cable_routes", (app, args) => CableDiagnosticsOperations.Routes(ActiveProject(app), args));
+            Register("explain_cable_length", (app, args) => JournalReviewOperations.Explain(ActiveProject(app), args));
+            Register("manage_clash_report", (app, args) => ClashReportFileOperations.Manage(app.Application.Username, args));
+            Register("capture_clash_view", (app, args) => ClashViewCaptureOperations.Capture(app, args));
+            Register("compare_clash_reports", (app, args) => ClashReportFileOperations.Compare(args));
+            Register("check_line_consistency", (app, args) => CableDiagnosticsOperations.Lines(ActiveProject(app), args));
+            Register("compare_journal_with_model", (app, args) => JournalReviewOperations.Compare(ActiveProject(app), args));
+            Register("run_project_checks", (app, args) => ProjectCheckOperations.Run(app, ActiveProject(app), args));
 
             // Параметры проекта
             Register("list_project_parameters", ListProjectParameters);

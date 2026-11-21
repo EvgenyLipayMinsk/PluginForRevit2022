@@ -110,13 +110,16 @@ class Smoke
             using(var book=new ExcelPackage(new FileInfo(xlsx)))
             {
                 var open=book.Workbook.Worksheets["Коллизии"]; var done=book.Workbook.Worksheets["Исправлено"];
-                Check(open.Cells[1,19].Text=="Скриншот","Screenshot header");
-                Check(open.Cells[2,5].Text=="Конфликт2" && open.Cells[3,5].Text=="Конфликт10","Natural order");
+                Check(open.Cells[1,3].Text=="Комментарий" && open.Cells[1,4].Text=="Скриншот" && open.Cells[1,5].Text=="Проверка / папка" && done.Cells[1,4].Text=="Скриншот","Screenshot header");
+                Check(open.Cells[2,6].Text=="Конфликт2" && open.Cells[3,6].Text=="Конфликт10","Natural order");
+                Check(open.Cells[2,19].Text=="report.html" && open.Cells[2,3].Text=="Комментарий коллеги", "Data shifted into wrong column");
                 Check(open.Drawings.Count==1 && done.Drawings.Count==1,"Pictures on both status sheets");
-                Check(open.Drawings[0].From.Row==1 && open.Drawings[0].From.Column==18,"Picture belongs to wrong row/column");
+                Check(done.Drawings[0].From.Column==3, "Fixed screenshot in wrong column");
+                Check(open.Cells[3,4].Text=="", "Optional screenshot must stay blank");
+                Check(open.Drawings[0].From.Row==1 && open.Drawings[0].From.Column==3,"Picture belongs to wrong row/column");
                 Check(open.Row(2).Height>100 && open.Row(3).Height<open.Row(2).Height,"Thumbnail row height");
-                Check(open.Cells[4,19].Text=="Изображение не найдено","Missing screenshot not reported");
-                Check(open.Cells[5,19].Text.StartsWith("Не удалось загрузить изображение"),"Corrupt screenshot not reported");
+                Check(open.Cells[4,4].Text=="Изображение не найдено","Missing screenshot not reported");
+                Check(open.Cells[5,4].Text.StartsWith("Не удалось загрузить изображение"),"Corrupt screenshot not reported");
                 Check(book.Workbook.Worksheets["Сводка"].Drawings.Count==0,"Unexpected summary image");
             }
             using(var archive=ZipFile.OpenRead(xlsx))

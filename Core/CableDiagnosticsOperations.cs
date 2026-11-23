@@ -23,6 +23,7 @@ namespace PluginForRevit2022.Core
         {
             var devices = Devices(doc, args);
             var rows = new List<Dictionary<string, object>>();
+            var connectionOrders = LineConnectionOrder.Read(doc);
             var allInstances = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>().ToList();
             foreach (var group in devices.Where(d => DeviceLineOperations.KeyOf(d, true) != null).GroupBy(d => DeviceLineOperations.KeyOf(d, true)))
             {
@@ -39,7 +40,7 @@ namespace PluginForRevit2022.Core
                     issues.Add(new { kind = "duplicate_number", number = repeated.Key, ids = repeated.Select(x => RevitIds.IdOf(x.device.Id)).ToList() });
                 var numbers = numbered.Where(x => x.number > 0).Select(x => x.number).Distinct().OrderBy(x => x).ToList();
                 long missing = numbers.Count == 0 ? 0 : (long)numbers.Last() - numbers.Count;
-                if (missing > 0) issues.Add(new { kind = "numbering_gaps", count = missing });
+                if (missing > 0 && !connectionOrders.ContainsKey(group.Key)) issues.Add(new { kind = "numbering_gaps", count = missing });
                 if (list.Count > DeviceMarkingOperations.LineCapacity) issues.Add(new { kind = "capacity", count = list.Count, capacity = DeviceMarkingOperations.LineCapacity });
                 var noComments = list.Where(d => string.IsNullOrWhiteSpace(DeviceMarkingOperations.CommentOf(d))).Select(d => RevitIds.IdOf(d.Id)).ToList();
                 if (noComments.Count > 0) issues.Add(new { kind = "empty_comments", ids = noComments });

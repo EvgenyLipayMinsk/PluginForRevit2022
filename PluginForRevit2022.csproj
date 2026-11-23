@@ -178,6 +178,8 @@
     <Compile Include="Core\ExportOperations.cs" />
     <Compile Include="Core\ModelCheckOperations.cs" />
     <Compile Include="Core\DeviceLineOperations.cs" />
+    <Compile Include="Core\LineConnectionOrder.cs" />
+    <Compile Include="UI\LineConnectionWindow.cs" />
     <Compile Include="Core\NestedCommentOperations.cs" />
     <Compile Include="Core\MarkingSettings.cs" />
     <Compile Include="Core\DetectorPlacementOperations.cs" />

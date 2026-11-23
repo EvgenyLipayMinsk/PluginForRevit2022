@@ -87,6 +87,12 @@ namespace PluginForRevit2022.Core
                 throw new ArgumentException("Укажите «Комментарии» линии (например АПС): в маркировке участвуют только устройства и трассы с этим значением.");
 
             List<FamilyInstance> devices = ResolveDevices(doc, request.Ids);
+            var protectedLines = LineConnectionOrder.Read(doc);
+            string targetKey = system == "aps"
+                ? DeviceLineOperations.ApsKey(request.Building, request.Controller, request.Line, request.Comments) : null;
+            if ((targetKey != null && protectedLines.ContainsKey(targetKey)) ||
+                devices.Any(d => protectedLines.ContainsKey(DeviceLineOperations.KeyOf(d, true) ?? "")))
+                throw new InvalidOperationException("Линия размечена по подключению. Используйте действия без перенумерации в «Диспетчере линий».");
             var warnings = new List<string>();
             MarkingSettings settings = MarkingSettings.Load();
             List<FamilyInstance> excluded = devices.Where(d => !settings.IsInLine(d.Symbol.FamilyName, system)).ToList();

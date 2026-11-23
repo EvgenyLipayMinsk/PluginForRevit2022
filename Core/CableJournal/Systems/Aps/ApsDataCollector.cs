@@ -45,7 +45,7 @@ namespace ARBM.CableJournalExporter.Services
         /// <param name="param">Значение параметра Comments для фильтрации.</param>
         /// <param name="cancel">Опциональный монитор отмены.</param>
         /// <returns>Список контроллеров с группировкой петель и устройств.</returns>
-        public List<ApsControllerWithLoops> CollectApsControllersWithLoopsByParam(Document doc, string param, CancellationMonitor cancel = null)
+        public List<ApsControllerWithLoops> CollectApsControllersWithLoopsByParam(Document doc, string param, CancellationMonitor cancel = null, string connectionLine = null)
         {
             var result = new List<ApsControllerWithLoops>();
 
@@ -73,6 +73,16 @@ namespace ARBM.CableJournalExporter.Services
                     })
                     .ToList();
 
+                if (connectionLine != null)
+                {
+                    string[] parts = connectionLine.Split('|');
+                    allControllers = allControllers.Where(c =>
+                    {
+                        var id = _parser.ParseApsControllerId(c);
+                        return id != null && id.DeviceNumber.ToString() == parts[2] &&
+                            string.Equals(id.BuildingNumber, parts[1], StringComparison.OrdinalIgnoreCase);
+                    }).ToList();
+                }
                 if (!allControllers.Any())
                     return result;
 
@@ -134,6 +144,8 @@ namespace ARBM.CableJournalExporter.Services
                         if (!string.Equals(comments?.Trim(), param?.Trim(), StringComparison.OrdinalIgnoreCase))
                             return false;
 
+                        if (connectionLine != null && PluginForRevit2022.Core.DeviceLineOperations.KeyOf(d) != connectionLine)
+                            return false;
                         string empty = EmptyDeviceParams(d);
                         if (empty != null) _skipped.Add($"устройство id {d.Id}: не заполнено {empty}");
                         return empty == null;
@@ -152,6 +164,8 @@ namespace ARBM.CableJournalExporter.Services
                         if (!string.Equals(comments?.Trim(), param?.Trim(), StringComparison.OrdinalIgnoreCase))
                             return false;
 
+                        if (connectionLine != null && PluginForRevit2022.Core.DeviceLineOperations.KeyOf(d) != connectionLine)
+                            return false;
                         string empty = EmptyDeviceParams(d);
                         if (empty != null) _skipped.Add($"устройство id {d.Id}: не заполнено {empty}");
                         return empty == null;
@@ -192,6 +206,28 @@ namespace ARBM.CableJournalExporter.Services
                 // 1.9: Валидировать наличие петель и количество устройств в петле
                 // Validate loops and device count per loop
                 // =================================================================
+                if (connectionLine == null)
+                {
+                    var orders = PluginForRevit2022.Core.LineConnectionOrder.Read(doc);
+                    foreach (var controller in result)
+                    foreach (var loop in controller.Loops)
+                    {
+                        string key = PluginForRevit2022.Core.DeviceLineOperations.KeyOf(loop.Devices[0].BaseInfo.Element);
+                        if (key == null || !orders.TryGetValue(key, out var saved)) continue;
+                        try
+                        {
+                            var byId = loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
+                            var order = PluginForRevit2022.Core.LineConnectionOrder.Ordered(loop.Devices.Select(d => (FamilyInstance)d.BaseInfo.Element), saved.Order);
+                            loop.Devices = order.Select(d => byId[d.UniqueId]).ToList();
+                            loop.ConnectionLineKey = key;
+                        }
+                        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+                        {
+                            TaskDialog.Show("Порядок подключения", $"Прибор {controller.ControllerId}, шлейф {loop.LoopNumber}. {ex.Message}");
+                            return new List<ApsControllerWithLoops>();
+                        }
+                    }
+                }
                 if (!_validator.ValidateApsControllersLoops(result))
                     return new List<ApsControllerWithLoops>();
 
@@ -217,7 +253,7 @@ namespace ARBM.CableJournalExporter.Services
 
                 TaskDialog.Show("Error",
                     $"Error collecting APS controllers and devices: {ex.Message}");
-                return result;
+                return new List<ApsControllerWithLoops>();
             }
         }
 

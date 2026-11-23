@@ -160,5 +160,6 @@ namespace PluginForRevit2022
     [Transaction(TransactionMode.Manual)] public class GuardJournalSecurityAll : GuardedCommand<ExportCableJournalCommand> { }
     [Transaction(TransactionMode.Manual)] public class GuardJournalSecurityByParam : GuardedCommand<ExportCableJournalByParamCommand> { }
     [Transaction(TransactionMode.Manual)] public class GuardJournalAps : GuardedCommand<ExportApsCableJournalCommand> { }
+    [Transaction(TransactionMode.Manual)] public class GuardJournalApsConnection : GuardedCommand<ExportApsConnectionJournalCommand> { }
     [Transaction(TransactionMode.Manual)] public class GuardJournalSouye : GuardedCommand<ExportSouyeCableJournalCommand> { }
 }

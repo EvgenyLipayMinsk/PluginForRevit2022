@@ -223,6 +223,7 @@ namespace ARBM.CableJournalExporter.Models
         /// EN: Number of object line (1, 2, 3, ...).
         /// </summary>
         public int LoopNumber { get; set; }
+        internal string ConnectionLineKey { get; set; }
 
         /// <summary>
         /// Список устройств, подключённых к этой линии, упорядоченных по номерам устройств.

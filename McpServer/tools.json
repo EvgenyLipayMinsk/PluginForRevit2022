@@ -1811,7 +1811,7 @@
     {
       "name": "add_device_to_line",
       "title": "Add device to a marked line",
-      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line. The new device must already have the line's Comments value, otherwise it is refused.",
+      "description": "Inserts a device into a marked line: after afterId, or at the start of the line when afterId is omitted and line is given. Connection-ordered APS lines require the Revit line manager. Line parameters are copied; following numbers shift by one. Ask the designer which line first (list_marked_lines). dryRun defaults to true. Building, controller, line and address are copied from the line (empty values too), so a device moved from another system leaves its old line. The new device must already have the line's Comments value, otherwise it is refused.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1841,7 +1841,7 @@
     {
       "name": "remove_devices_from_line",
       "title": "Remove devices from a marked line",
-      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Model elements, the floor and ARBM_ЗКПС are not changed. dryRun defaults to true. With line, all devices must belong to that line.",
+      "description": "Clears all marking parameters of the devices including Comments and closes the gaps in numbering. Connection-ordered APS lines require the Revit line manager. Model elements, the floor and ARBM_ЗКПС are not changed. dryRun defaults to true. With line, all devices must belong to that line.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -4011,7 +4011,7 @@
     {
       "name": "check_line_consistency",
       "title": "Check marked line consistency",
-      "description": "Read-only check using existing dispatcher line keys: duplicate/invalid device numbers, numbering gaps, line capacity, empty Comments, missing/ambiguous APS controllers, unassigned device IDs and the existing project-wide APS journal-level check. line/comments restrict device-number checks; journalLevels explicitly covers the whole project. No re-marking or parameter writes.",
+      "description": "Read-only check using existing dispatcher line keys: duplicate/invalid device numbers, numbering gaps for sequential marking, line capacity, empty Comments, missing/ambiguous APS controllers, unassigned device IDs and the existing project-wide APS journal-level check. line/comments restrict device-number checks; journalLevels explicitly covers the whole project. No re-marking or parameter writes.",
       "inputSchema": {
         "type": "object",
         "properties": {

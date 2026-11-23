@@ -1700,6 +1700,8 @@ namespace ARBM.CableJournalExporter.Services
                 });
             }
 
+            if (ApsRouteFilter != null) filteredElements = filteredElements.Where(ApsRouteFilter);
+
             var allRoutes = new List<Element>();
 
             foreach (var el in filteredElements)
@@ -2803,6 +2805,8 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                 : parameter.AsString();
             return CableInstallationLengths.FromTypeName(name);
         }
+
+        internal Func<Element, bool> ApsRouteFilter { get; set; }
 
         public bool LastRouteBridged { get; private set; }
 

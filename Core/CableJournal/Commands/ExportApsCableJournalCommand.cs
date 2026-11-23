@@ -8,6 +8,9 @@ using Autodesk.Revit.UI.Selection;
 using System;   
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using PluginForRevit2022.Core;
+using RevitTaskDialog = Autodesk.Revit.UI.TaskDialog;
 using System.Text;
 using System.Threading;
 using System.Windows.Controls;
@@ -16,8 +19,16 @@ using static ARBM.CableJournalExporter.Services.RouteLengthCalculator.Graph;
 namespace ARBM.CableJournalExporter.Commands
 {
     [Transaction(TransactionMode.Manual)]
+    public class ExportApsConnectionJournalCommand : ExportApsCableJournalCommand
+    {
+        protected override bool ReviewConnectionOrder => true;
+    }
+
+    [Transaction(TransactionMode.Manual)]
     public class ExportApsCableJournalCommand : IExternalCommand
     {
+        protected virtual bool ReviewConnectionOrder => false;
+
         public Result Execute(
            ExternalCommandData commandData,
            ref string message,
@@ -56,7 +67,8 @@ namespace ARBM.CableJournalExporter.Commands
 
                 // Информируем пользователя о необходимом действии
                 // EN: Inform user about the required action
-                TaskDialog.Show("Select element",
+                if (ReviewConnectionOrder) RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
+                else TaskDialog.Show("Select element",
                     "Select one element with a filled system parameter \"Comments = АПС\".\n" +
                     "Allowed categories: MechanicalEquipment, ElectricalEquipment, DataDevices," +
                     " OST_FireAlarmDevices.");
@@ -94,6 +106,13 @@ namespace ARBM.CableJournalExporter.Commands
                 {
                     TaskDialog.Show("Error",
                         "Selected element does not contain a valid Comments parameter.");
+                    return Result.Cancelled;
+                }
+
+                string connectionLine = ReviewConnectionOrder ? DeviceLineOperations.KeyOf(picked) : null;
+                if (ReviewConnectionOrder && (connectionLine == null || !connectionLine.StartsWith("aps|", StringComparison.Ordinal)))
+                {
+                    RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
                     return Result.Cancelled;
                 }
 
@@ -149,7 +168,7 @@ namespace ARBM.CableJournalExporter.Commands
 
                 ApsDataCollector apsDataCollector = new ApsDataCollector();
                 var apsControllersWithLoops =
-                    apsDataCollector.CollectApsControllersWithLoopsByParam(doc, paramValue, cancelMonitor);
+                    apsDataCollector.CollectApsControllersWithLoopsByParam(doc, paramValue, cancelMonitor, connectionLine);
 
                 cancelMonitor.ClearCurrentOperation();
 
@@ -163,6 +182,35 @@ namespace ARBM.CableJournalExporter.Commands
 
                 if (apsControllersWithLoops == null || apsControllersWithLoops.Count == 0)
                     return Result.Cancelled;
+
+                PluginForRevit2022.LineConnectionWindow.Line reviewed = null;
+                if (ReviewConnectionOrder)
+                {
+                    string key = connectionLine;
+                    var selected = (from controller in apsControllersWithLoops
+                                    from loop in controller.Loops
+                                    where loop.Devices.Any(d => DeviceLineOperations.KeyOf(d.BaseInfo.Element) == key)
+                                    select new { controller, loop }).ToList();
+                    if (key == null || selected.Count != 1)
+                    {
+                        RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
+                        return Result.Cancelled;
+                    }
+                    var entry = selected[0];
+                    var devices = entry.loop.Devices.Select(d => (FamilyInstance)d.BaseInfo.Element).ToList();
+                    if (!new HashSet<string>(DeviceLineOperations.DevicesOf(doc, key).Select(d => d.UniqueId)).SetEquals(devices.Select(d => d.UniqueId)))
+                        throw new InvalidOperationException("Часть устройств линии не прошла проверку КЖ. Проверьте маркировку и этажи устройств.");
+                    reviewed = PluginForRevit2022.LineManagerWindow.PrepareConnection(doc, key, devices, entry.controller.Controller.Element,
+                        entry.controller.ControllerId.ToString(), entry.loop.TypeLoop == TypeLoop.Annular);
+                    if (new PluginForRevit2022.LineConnectionWindow(new[] { reviewed }, "Сформировать КЖ",
+                        commandData.Application.MainWindowHandle).ShowDialog() != true) return Result.Cancelled;
+
+                    var byId = entry.loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
+                    entry.loop.Devices = reviewed.Order.Select(id => byId[id]).ToList();
+                    entry.loop.ConnectionLineKey = reviewed.Key;
+                    entry.controller.Loops = new List<ApsLoopGroup> { entry.loop };
+                    apsControllersWithLoops = new List<ApsControllerWithLoops> { entry.controller };
+                }
 
                 LengthMode mode = LengthMode.Route;
 
@@ -218,8 +266,23 @@ namespace ARBM.CableJournalExporter.Commands
                 cancelMonitor.SetCurrentOperation("ExportToExcel");
                 try
                 {
+                    if (reviewed != null && records.Any(r => r.IsFallbackForLength) &&
+                        System.Windows.MessageBox.Show("Некоторые длины рассчитаны с обходом разрыва или по прямой. Они будут выделены в журнале. Продолжить выгрузку?",
+                            "КЖ по подключению", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
+                        return Result.Cancelled;
                     PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
-                    exporter.ExportCableRecords(templatePath, savePath, records);
+                    if (reviewed == null) exporter.ExportCableRecords(templatePath, savePath, records);
+                    else
+                    {
+                        using (var group = new TransactionGroup(doc, "AerBIM: подтвердить порядок и выгрузить КЖ"))
+                        {
+                            group.Start();
+                            DeviceLineOperations.SaveConnectionOrder(doc, reviewed.Key, reviewed.Order);
+                            exporter.ExportCableRecords(templatePath, savePath, records);
+                            if (group.Assimilate() != TransactionStatus.Committed)
+                                RevitTaskDialog.Show("КЖ по подключению", "Журнал выгружен. Revit не сохранил порядок подключения в модели.");
+                        }
+                    }
                 }
                 finally
                 {

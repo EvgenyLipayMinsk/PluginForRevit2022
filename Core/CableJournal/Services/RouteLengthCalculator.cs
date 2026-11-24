@@ -14,6 +14,7 @@ namespace ARBM.CableJournalExporter.Services
    
     public partial class RouteLengthCalculator
     {
+        private readonly string _floorParameter = PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
         // ============================================================
         // Константы
         // ============================================================
@@ -559,14 +560,14 @@ namespace ARBM.CableJournalExporter.Services
         /// The numeric level ID, or -1 if the level cannot be resolved.
         /// </returns>
         /// <summary>
-        /// Уровень по ADSK_Этаж (только цифра): «3» → уровень с номером 3 в имени («Этаж 03»).
+        /// Уровень по параметру этажа из настроек (только цифра): «3» → уровень с номером 3 в имени («Этаж 03»).
         /// Номер, которого нет в именах уровней (техпространство, этаж 6), — уровень по высоте элемента
         /// (ближайший не выше точки, +50 мм). Пусто или не число — −1, дальше прежние правила.
         /// Так трасса под перекрытием и устройства её этажа попадают в один граф, без «мостов».
         /// </summary>
         private long GetLevelIdFromFloorNumber(Element el)
         {
-            string floor = el.LookupParameter("ADSK_Этаж")?.AsString()?.Trim();
+            string floor = el.LookupParameter(_floorParameter)?.AsString()?.Trim();
             if (string.IsNullOrEmpty(floor) || !int.TryParse(floor, out int number)) return -1;
             foreach (var pair in _levelsById)
             {
@@ -627,7 +628,7 @@ namespace ARBM.CableJournalExporter.Services
         /// Determines the level ID for a device (family instance).
         /// 
         /// The method attempts several strategies:
-        /// 1. If the device has parameter "ADSK_Этаж", its value is matched to a level name.
+        /// 1. If the configured floor parameter is present, its value is matched to a level name.
         /// 2. If the device has a host, the host's level is used.
         /// 3. If the device has a <see cref="LocationPoint"/>, the nearest level by elevation is selected.
         /// 
@@ -638,8 +639,8 @@ namespace ARBM.CableJournalExporter.Services
         /// <returns>The numeric level ID, or -1 if unresolved.</returns>
         public long GetLevelIdForDevice(Document doc, FamilyInstance fi)
         {
-            // 1) Попытка получить уровень из параметра ADSK_Этаж
-            var p = fi.LookupParameter("ADSK_Этаж");
+            // 1) Попытка получить уровень из настроенного параметра этажа
+            var p = fi.LookupParameter(_floorParameter);
             if (p != null && p.StorageType == StorageType.String)
             {
                 string floorName = p.AsString();

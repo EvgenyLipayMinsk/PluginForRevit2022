@@ -47,14 +47,6 @@ namespace PluginForRevit2022.Core
         internal const string ParamGrouping = "ADSK_Группирование";
         internal const int LineCapacity = 250;
 
-        /// <summary>Параметр этажа устройства: СОУЭ — из «Настроек маркировки» (его же читает журнал СОУЭ), АПС и СОТС — ADSK_Этаж.</summary>
-        public static string FloorParameterOf(string system)
-        {
-            if (system != "souye") return "ADSK_Этаж";
-            string configured = MarkingSettings.CurrentJournal().FloorParameter;
-            return string.IsNullOrWhiteSpace(configured) ? "ADSK_Этаж" : configured.Trim();
-        }
-
         /// <summary>«Комментарии» элемента без пробелов по краям.</summary>
         public static string CommentOf(Element e) => e.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim() ?? "";
 
@@ -75,10 +67,9 @@ namespace PluginForRevit2022.Core
             if (system != "security") Require(request.Building, "building (ARBM_Корпус)");
             RequireNumber(request.Controller, "controller");
             RequireNumber(request.Line, "line");
-            if (system == "aps" && !Regex.IsMatch(request.Building.Trim(), "^[A-Za-z0-9]+$"))
+            if (system == "aps" && !ApsElementParser.IsValidBuildingCode(request.Building.Trim()))
             {
-                throw new ArgumentException($"building «{request.Building.Trim()}»: для АПС корпус пишется только латинскими буквами и цифрами " +
-                    "(например M2). Журнал не примет корпус с русскими буквами, даже если они выглядят как латинские.");
+                throw new ArgumentException($"Корпус «{request.Building.Trim()}»: используйте латинские буквы, цифры и при необходимости уточнение в скобках (например M2 или UO(OW)).");
             }
             FamilyInstance controller = ResolveController(doc, request.ControllerElementId);
             // Комментарий линии задаётся при маркировке (любой, например «АПС»). Для АПС обязателен: по нему линия
@@ -128,14 +119,14 @@ namespace PluginForRevit2022.Core
             string order = (request.Order ?? "manual").Trim().ToLowerInvariant();
             if (order != "route" && order != "snake" && order != "manual") throw new ArgumentException("order: manual, route или snake.");
 
-            string floorParam = FloorParameterOf(system);
+            string floorParam = MarkingSettings.CurrentFloorParameter();
             var changes = new List<Dictionary<string, object>>();
             var failures = new List<string>();
             var result = new Dictionary<string, object>();
             using (var transaction = new Transaction(doc, "AerBIM: маркировка устройств"))
             {
                 transaction.Start();
-                // Этаж трасс (ADSK_Этаж) заполняется вручную; порядок считается по уже заполненному.
+                // Этаж трасс заполняется вручную; порядок считается по уже заполненному.
                 if (order == "route") devices = OrderByRoute(doc, devices, request, warnings);
                 else if (order == "snake") devices = OrderBySnake(devices, RevitText.ToFeet(request.RowMm));
 
@@ -488,10 +479,11 @@ namespace PluginForRevit2022.Core
             // Этаж трасс заполняется вручную. Без него уровень пришлось бы угадывать (по высоте или основе),
             // и порядок по кабелю разошёлся бы с журналом — обход не запускается, порядок по графу журнала.
             // По «Комментариям» берутся трассы всей системы — чужая трасса без этажа не должна отключать обход
-            List<FamilyInstance> noFloor = !byGrouping ? new List<FamilyInstance>() : ofLine.Where(c => !int.TryParse(c.LookupParameter("ADSK_Этаж")?.AsString()?.Trim(), out _)).ToList();
+            string floorParameter = MarkingSettings.CurrentFloorParameter();
+            List<FamilyInstance> noFloor = !byGrouping ? new List<FamilyInstance>() : ofLine.Where(c => !int.TryParse(c.LookupParameter(floorParameter)?.AsString()?.Trim(), out _)).ToList();
             if (noFloor.Count > 0)
             {
-                warnings.Add($"у трасс линии не заполнен «ADSK_Этаж» цифрой: {noFloor.Count} из {ofLine.Count} " +
+                warnings.Add($"у трасс линии не заполнен «{floorParameter}» цифрой: {noFloor.Count} из {ofLine.Count} " +
                     $"(id {string.Join(", ", noFloor.Take(10).Select(c => RevitIds.IdOf(c.Id)))}{(noFloor.Count > 10 ? ", …" : "")}) — " +
                     "журнал положит их на этаж основы; заполните этаж устройств, которые на них висят. Порядок по ходу кабеля не строился: порядок по минимуму кабеля");
             }

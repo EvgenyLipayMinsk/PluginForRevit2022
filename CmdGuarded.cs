@@ -94,7 +94,10 @@ namespace PluginForRevit2022
                 return true; // параметры проекта к семейству не относятся
             }
 
-            List<ParameterIssue> issues = PluginParameterCheck.Check(doc);
+            // СОУЭ проверяет мощность оповещателей после выбора стандарта, включая параметры семейства.
+            bool includeDefaultFloor = string.Equals(MarkingSettings.CurrentFloorParameter(),
+                MarkingSettings.DefaultFloorParameter, StringComparison.OrdinalIgnoreCase);
+            List<ParameterIssue> issues = PluginParameterCheck.Check(doc, includePower: false, includeDefaultFloor: includeDefaultFloor);
             if (issues.Count == 0)
             {
                 return true;
@@ -139,7 +142,7 @@ namespace PluginForRevit2022
             try
             {
                 PluginParameterCheck.Fix(doc, uiApp.Application, issues, false);
-                List<ParameterIssue> left = PluginParameterCheck.Check(doc);
+                List<ParameterIssue> left = PluginParameterCheck.Check(doc, includePower: false, includeDefaultFloor: includeDefaultFloor);
                 if (left.Count > 0)
                 {
                     TaskDialog.Show("Проверка параметров проекта", "Исправлено не всё:\n\n" + PluginParameterCheck.Report(left));

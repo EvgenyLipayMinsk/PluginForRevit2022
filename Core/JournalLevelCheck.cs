@@ -11,7 +11,7 @@ namespace PluginForRevit2022.Core
     /// (RouteLengthCalculator.GetLevelIdFromHost / GetLevelIdForDevice), и сравнивает по линиям:
     /// трассы без уровня (журнал кладёт их в общий граф «−1»), трассы, у которых уровень журнала не совпадает
     /// с уровнем по высоте, устройства, у которых уровень журнала не совпадает с уровнем их трассы
-    /// (журнал не найдёт путь и «перекинет мост»), и пустой ADSK_Этаж у трасс и устройств.
+    /// (журнал не найдёт путь и «перекинет мост»), и пустой параметр этажа у трасс и устройств.
     /// </summary>
     internal static class JournalLevelCheck
     {
@@ -19,6 +19,7 @@ namespace PluginForRevit2022.Core
         {
             double attach = (attachMm <= 0 ? 600 : attachMm) / 304.8;
             CableWalk.ResetLevels();
+            string floorParameter = MarkingSettings.CurrentFloorParameter();
             List<Level> levels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
             string LevelName(long id) => id == -1 ? "нет уровня" : levels.FirstOrDefault(l => RevitIds.IdOf(l.Id) == id)?.Name ?? id.ToString();
 
@@ -50,7 +51,7 @@ namespace PluginForRevit2022.Core
                 var cableInfo = cables.Select(cable =>
                 {
                     Curve curve = ((LocationCurve)cable.Location).Curve;
-                    long journal = CableLevel(cable);
+                    long journal = CableLevel(cable, floorParameter);
                     long byHeight = RevitIds.IdOf(CableWalk.LevelByZ(doc, (curve.GetEndPoint(0) + curve.GetEndPoint(1)) / 2)?.Id ?? ElementId.InvalidElementId);
                     return (cable, curve, journal, byHeight);
                 }).ToList();
@@ -58,14 +59,14 @@ namespace PluginForRevit2022.Core
                 List<long> noLevel = cableInfo.Where(x => x.journal == -1).Select(x => RevitIds.IdOf(x.cable.Id)).ToList();
                 List<string> wrongLevel = cableInfo.Where(x => x.journal != -1 && x.byHeight != -1 && x.journal != x.byHeight)
                     .Select(x => $"{RevitIds.IdOf(x.cable.Id)} ({LevelName(x.journal)} ≠ по высоте {LevelName(x.byHeight)})").ToList();
-                List<long> cableNoFloor = cables.Where(x => string.IsNullOrWhiteSpace(Read(x, "ADSK_Этаж"))).Select(x => RevitIds.IdOf(x.Id)).ToList();
+                List<long> cableNoFloor = cables.Where(x => string.IsNullOrWhiteSpace(Read(x, floorParameter))).Select(x => RevitIds.IdOf(x.Id)).ToList();
 
                 var deviceMismatch = new List<string>();
                 var notOnCable = new List<long>();
                 foreach (FamilyInstance device in devices)
                 {
                     XYZ p = ((LocationPoint)device.Location).Point;
-                    long deviceLevel = DeviceLevel(doc, device, levels);
+                    long deviceLevel = DeviceLevel(doc, device, levels, floorParameter);
                     var nearest = cableInfo
                         .Select(x => (x, distance: DistanceToCurvePlan(p, x.curve)))
                         .Where(x => x.distance <= attach)
@@ -83,7 +84,7 @@ namespace PluginForRevit2022.Core
                         deviceMismatch.Add($"{RevitIds.IdOf(device.Id)} №{Read(device, DeviceMarkingOperations.ParamMark)}: устройство {LevelName(deviceLevel)}, трасса {LevelName(cableLevel)}");
                     }
                 }
-                List<long> deviceNoFloor = devices.Where(x => string.IsNullOrWhiteSpace(Read(x, "ADSK_Этаж"))).Select(x => RevitIds.IdOf(x.Id)).ToList();
+                List<long> deviceNoFloor = devices.Where(x => string.IsNullOrWhiteSpace(Read(x, floorParameter))).Select(x => RevitIds.IdOf(x.Id)).ToList();
 
                 int problems = noLevel.Count + wrongLevel.Count + deviceMismatch.Count + notOnCable.Count;
                 totalProblems += problems;
@@ -112,10 +113,10 @@ namespace PluginForRevit2022.Core
             };
         }
 
-        /// <summary>Как журнал: ADSK_Этаж (цифра) → уровень с этим номером или по высоте; основа-уровень, уровень основы, «Уровень», иначе −1.</summary>
-        private static long CableLevel(FamilyInstance cable)
+        /// <summary>Как журнал: параметр этажа (цифра) → уровень с этим номером или по высоте; основа-уровень, уровень основы, «Уровень», иначе −1.</summary>
+        private static long CableLevel(FamilyInstance cable, string floorParameter)
         {
-            string floor = Read(cable, "ADSK_Этаж");
+            string floor = Read(cable, floorParameter);
             if (int.TryParse(floor, out int number))
             {
                 List<Level> all = new FilteredElementCollector(cable.Document).OfClass(typeof(Level)).Cast<Level>().ToList();
@@ -133,13 +134,13 @@ namespace PluginForRevit2022.Core
             return -1;
         }
 
-        /// <summary>Как журнал: ADSK_Этаж как имя уровня, основа, «Уровень спецификации», ближайший по Elevation.</summary>
-        private static long DeviceLevel(Document doc, FamilyInstance device, List<Level> levels)
+        /// <summary>Как журнал: параметр этажа как имя уровня, основа, «Уровень спецификации», ближайший по Elevation.</summary>
+        private static long DeviceLevel(Document doc, FamilyInstance device, List<Level> levels, string floorParameter)
         {
-            string floor = Read(device, "ADSK_Этаж");
+            string floor = Read(device, floorParameter);
             Level byName = string.IsNullOrEmpty(floor) ? null : levels.FirstOrDefault(l => l.Name.Equals(floor, StringComparison.OrdinalIgnoreCase));
             if (byName != null) return RevitIds.IdOf(byName.Id);
-            long host = CableLevel(device);
+            long host = CableLevel(device, floorParameter);
             if (host != -1) return host;
             ElementId schedule = device.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM)?.AsElementId();
             if (schedule != null && schedule != ElementId.InvalidElementId) return RevitIds.IdOf(schedule);

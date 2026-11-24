@@ -18,7 +18,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
 
         /// <summary>
         /// Этаж установки контроллера.
-        /// Источник: параметр <c>ADSK_Этаж</c>.
+        /// Источник: параметр этажа из настроек маркировки.
         /// Используется как <c>CableRecord.StartLevel</c> для первого сегмента каждого шлейфа.
         /// </summary>
         public string Floor { get; set; }
@@ -59,7 +59,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
 
         /// <summary>
         /// Этаж установки оповещателя.
-        /// Источник: параметр <c>ADSK_Этаж</c>.
+        /// Источник: параметр этажа из настроек маркировки.
         /// Используется как <c>CableRecord.StartLevel</c> / <c>CableRecord.EndLevel</c>.
         /// </summary>
         public string Floor { get; set; }

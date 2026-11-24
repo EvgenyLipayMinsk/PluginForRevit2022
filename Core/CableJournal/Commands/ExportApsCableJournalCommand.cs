@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using PluginForRevit2022.Core;
+using PluginForRevit2022.Core.CableJournal;
 using RevitTaskDialog = Autodesk.Revit.UI.TaskDialog;
 using System.Text;
 using System.Threading;
@@ -27,6 +28,7 @@ namespace ARBM.CableJournalExporter.Commands
     [Transaction(TransactionMode.Manual)]
     public class ExportApsCableJournalCommand : IExternalCommand
     {
+        private const string ConnectionTitle = "КЖ АПС по порядку подключения";
         protected virtual bool ReviewConnectionOrder => false;
 
         public Result Execute(
@@ -67,7 +69,7 @@ namespace ARBM.CableJournalExporter.Commands
 
                 // Информируем пользователя о необходимом действии
                 // EN: Inform user about the required action
-                if (ReviewConnectionOrder) RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
+                if (ReviewConnectionOrder) RevitTaskDialog.Show(ConnectionTitle, "Выберите размеченное устройство нужного шлейфа АПС.");
                 else TaskDialog.Show("Select element",
                     "Select one element with a filled system parameter \"Comments = АПС\".\n" +
                     "Allowed categories: MechanicalEquipment, ElectricalEquipment, DataDevices," +
@@ -79,9 +81,15 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Request to select one element using custom CommentsFilter
                 // The filter restricts selection to only elements from allowed categories
                 // that already have Comments parameter set
-                Reference pickedRef = uidoc.Selection.PickObject(
-                    ObjectType.Element,
-                    new CommentsFilter()); // комментарий линии задаётся при маркировке — любой непустой
+                Reference pickedRef;
+                try
+                {
+                    pickedRef = uidoc.Selection.PickObject(ObjectType.Element, new CommentsFilter());
+                }
+                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                {
+                    return Result.Cancelled;
+                }
 
                 // Если пользователь отменил выбор (нажал Escape или закрыл диалог)
                 // EN: If user cancelled selection (pressed Escape or closed dialog)
@@ -112,63 +120,29 @@ namespace ARBM.CableJournalExporter.Commands
                 string connectionLine = ReviewConnectionOrder ? DeviceLineOperations.KeyOf(picked) : null;
                 if (ReviewConnectionOrder && (connectionLine == null || !connectionLine.StartsWith("aps|", StringComparison.Ordinal)))
                 {
-                    RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
+                    RevitTaskDialog.Show(ConnectionTitle, "Выберите размеченное устройство нужного шлейфа АПС.");
                     return Result.Cancelled;
                 }
 
-                // =================================================================
-                // БЛОК 2️⃣: Выбор файла шаблона Excel
-                // BLOCK 2️⃣: Select Excel template file
-                // =================================================================
-
-                // Создаём сервис для работы с файловыми диалогами
-                // EN: Create service for working with file dialogs
                 var dialog = new FileDialogService();
-
-                // Запрашиваем у пользователя выбор файла шаблона Excel
-                // EN: Request user to select Excel template file
-                string templatePath = dialog.SelectTemplateFile();
-
-                // Проверяем, был ли выбран файл
-                // EN: Verify that a file was selected
-                if (string.IsNullOrWhiteSpace(templatePath))
+                string templatePath = null;
+                if (!ReviewConnectionOrder)
                 {
-                    TaskDialog.Show("Cancel",
-                        "Excel template not selected. Command aborted.");
-                    return Result.Cancelled;
-                }
-
-                // =================================================================
-                // БЛОК 3️⃣: Валидация структуры шаблона
-                // BLOCK 3️⃣: Validate template structure
-                // =================================================================
-
-                // Создаём валидатор для проверки структуры шаблона
-                // EN: Create validator to check template structure
-                var validator = new JournalFormExporter(dialog.SelectedForm);
-
-                // Определяем ожидаемую структуру шаблона (какие колонки, какие значения и т.д.)
-                // EN: Define the expected template structure (columns, values, etc.)
-                var expectedStructure = new TemplateStructure();
-
-                // Валидируем выбранный шаблон против ожидаемой структуры
-                // EN: Validate selected template against expected structure
-                var validation = validator.Validate(templatePath, expectedStructure);
-
-                // Если валидация не прошла — выводим ошибку и завершаем команду
-                // EN: If validation failed — show error and abort command
-                if (!validation.IsValid)
-                {
-                    TaskDialog.Show("Template error", validation.Message);
-                    return Result.Failed;
+                    Result templateResult = SelectTemplate(dialog, out templatePath);
+                    if (templateResult != Result.Succeeded) return templateResult;
                 }
 
                 // --- Сбор контроллеров: перед долгой операцией указываем операцию в мониторе ---
                 cancelMonitor.SetCurrentOperation("CollectApsControllers");
 
-                ApsDataCollector apsDataCollector = new ApsDataCollector();
-                var apsControllersWithLoops =
-                    apsDataCollector.CollectApsControllersWithLoopsByParam(doc, paramValue, cancelMonitor, connectionLine);
+                var parser = new ApsElementParser();
+                var collector = new ApsDataCollector(parser);
+                var validationMessages = new List<string>();
+                List<ApsControllerWithLoops> apsControllersWithLoops;
+                using (ReviewConnectionOrder ? JournalDialog.Capture(validationMessages) : null)
+                {
+                    apsControllersWithLoops = collector.CollectApsControllersWithLoopsByParam(doc, paramValue, cancelMonitor, connectionLine);
+                }
 
                 cancelMonitor.ClearCurrentOperation();
 
@@ -181,7 +155,11 @@ namespace ARBM.CableJournalExporter.Commands
                 }
 
                 if (apsControllersWithLoops == null || apsControllersWithLoops.Count == 0)
+                {
+                    if (ReviewConnectionOrder)
+                        ShowConnectionError(connectionLine, parser.FloorParameter, "Не удалось собрать устройства шлейфа.", validationMessages);
                     return Result.Cancelled;
+                }
 
                 PluginForRevit2022.LineConnectionWindow.Line reviewed = null;
                 if (ReviewConnectionOrder)
@@ -191,25 +169,32 @@ namespace ARBM.CableJournalExporter.Commands
                                     from loop in controller.Loops
                                     where loop.Devices.Any(d => DeviceLineOperations.KeyOf(d.BaseInfo.Element) == key)
                                     select new { controller, loop }).ToList();
-                    if (key == null || selected.Count != 1)
+                    if (selected.Count != 1)
                     {
-                        RevitTaskDialog.Show("КЖ по подключению", "Выберите размеченное устройство нужного шлейфа АПС.");
+                        string reason = selected.Count == 0 ? "Шлейф не найден у прибора." : "Найдено несколько приборов для одного шлейфа.";
+                        ShowConnectionError(key, parser.FloorParameter, reason, validationMessages);
                         return Result.Cancelled;
                     }
                     var entry = selected[0];
                     var devices = entry.loop.Devices.Select(d => (FamilyInstance)d.BaseInfo.Element).ToList();
                     if (!new HashSet<string>(DeviceLineOperations.DevicesOf(doc, key).Select(d => d.UniqueId)).SetEquals(devices.Select(d => d.UniqueId)))
-                        throw new InvalidOperationException("Часть устройств линии не прошла проверку КЖ. Проверьте маркировку и этажи устройств.");
+                    {
+                        ShowConnectionError(key, parser.FloorParameter, "Часть устройств линии не прошла проверку КЖ.", validationMessages);
+                        return Result.Cancelled;
+                    }
                     reviewed = PluginForRevit2022.LineManagerWindow.PrepareConnection(doc, key, devices, entry.controller.Controller.Element,
                         entry.controller.ControllerId.ToString(), entry.loop.TypeLoop == TypeLoop.Annular);
                     if (new PluginForRevit2022.LineConnectionWindow(new[] { reviewed }, "Сформировать КЖ",
-                        commandData.Application.MainWindowHandle).ShowDialog() != true) return Result.Cancelled;
+                        commandData.Application.MainWindowHandle, title: ConnectionTitle).ShowDialog() != true) return Result.Cancelled;
 
                     var byId = entry.loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
                     entry.loop.Devices = reviewed.Order.Select(id => byId[id]).ToList();
                     entry.loop.ConnectionLineKey = reviewed.Key;
                     entry.controller.Loops = new List<ApsLoopGroup> { entry.loop };
                     apsControllersWithLoops = new List<ApsControllerWithLoops> { entry.controller };
+
+                    Result templateResult = SelectTemplate(dialog, out templatePath);
+                    if (templateResult != Result.Succeeded) return templateResult;
                 }
 
                 LengthMode mode = LengthMode.Route;
@@ -217,7 +202,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // Перед построением графов и расчётом длин указываем операцию
                 cancelMonitor.SetCurrentOperation("BuildRecordsAndGraphs");
 
-                var builder = new ApsCableRecordBuilder(new ApsElementParser(), doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("aps"));
+                var builder = new ApsCableRecordBuilder(parser, doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("aps"));
                 List<CableRecord> records = null;
                 try
                 {
@@ -280,7 +265,7 @@ namespace ARBM.CableJournalExporter.Commands
                             DeviceLineOperations.SaveConnectionOrder(doc, reviewed.Key, reviewed.Order);
                             exporter.ExportCableRecords(templatePath, savePath, records);
                             if (group.Assimilate() != TransactionStatus.Committed)
-                                RevitTaskDialog.Show("КЖ по подключению", "Журнал выгружен. Revit не сохранил порядок подключения в модели.");
+                                RevitTaskDialog.Show(ConnectionTitle, "Журнал выгружен. Revit не сохранил порядок подключения в модели.");
                         }
                     }
                 }
@@ -320,6 +305,27 @@ namespace ARBM.CableJournalExporter.Commands
         /// Отображает итоговое информационное окно после успешного экспорта АПС.
         /// Показывает количество строк, время выполнения и пути к файлам.
         /// </summary>
+        private static Result SelectTemplate(FileDialogService dialog, out string templatePath)
+        {
+            templatePath = dialog.SelectTemplateFile();
+            if (string.IsNullOrWhiteSpace(templatePath)) return Result.Cancelled;
+
+            var validation = new JournalFormExporter(dialog.SelectedForm).Validate(templatePath, new TemplateStructure());
+            if (validation.IsValid) return Result.Succeeded;
+
+            RevitTaskDialog.Show("Ошибка шаблона кабельного журнала", validation.Message);
+            return Result.Failed;
+        }
+
+        private static void ShowConnectionError(string key, string floorParameter, string reason, List<string> details)
+        {
+            string[] line = key.Split('|');
+            string context = $"Прибор «{line[1]}.ARK.{line[2]}», шлейф {line[3]}. Параметр этажа «{floorParameter}».";
+            string report = string.Join("\n\n", new[] { reason, context }.Concat(details));
+            PluginLog.Warn("aps.connection", report);
+            RevitTaskDialog.Show(ConnectionTitle, report);
+        }
+
         private static void ShowSummary(
             int totalRecords,
             string outputPath,

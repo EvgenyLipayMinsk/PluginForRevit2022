@@ -149,7 +149,7 @@ namespace ARBM.CableJournalExporter.Commands
 
                 var parameterStandardDialog = new TaskDialog("Выбор стандарта параметров");
                 parameterStandardDialog.MainInstruction = "Выберите стандарт именования параметров для элементов СОУЭ:";
-                string floorParameter = PluginForRevit2022.Core.MarkingSettings.CurrentJournal().FloorParameter;
+                string floorParameter = PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
                 parameterStandardDialog.MainContent =
                     "ЭОМ — мощность из ЭОМ_Мощность_Номинальная\n\n" +
                     "ADSK — мощность из ADSK_Номинальная мощность\n\n" +

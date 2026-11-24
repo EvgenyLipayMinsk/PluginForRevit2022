@@ -34,6 +34,7 @@ namespace PluginForRevit2022.Core
         {
             missed = new List<FamilyInstance>();
             problem = null;
+            string floorParameter = MarkingSettings.CurrentFloorParameter();
             _levels = null;
 
             // Отрезки кабеля по этажам
@@ -43,7 +44,7 @@ namespace PluginForRevit2022.Core
             {
                 if (!(cable.Location is LocationCurve curve)) continue;
                 IList<XYZ> points = curve.Curve.Tessellate();
-                long level = LevelOf(cable);
+                long level = LevelOf(cable, floorParameter);
                 for (int i = 1; i < points.Count; i++) { segments.Add((points[i - 1], points[i], level)); segmentIds.Add(RevitIds.IdOf(cable.Id)); }
             }
             if (segments.Count == 0)
@@ -105,7 +106,7 @@ namespace PluginForRevit2022.Core
             {
                 XYZ p = (device.Location as LocationPoint)?.Point;
                 if (p == null) continue;
-                var node = new Node { Point = p, Level = LevelOf(device), Device = device };
+                var node = new Node { Point = p, Level = LevelOf(device, floorParameter), Device = device };
                 // На совпадающих кабелях («туда» и «обратно») устройство встаёт на каждый из них — это одна точка.
                 bool placed = false;
                 for (int i = 0; i < segments.Count; i++)
@@ -130,13 +131,13 @@ namespace PluginForRevit2022.Core
             }
 
             XYZ cp = (controller.Location as LocationPoint)?.Point;
-            int controllerSegment = cp == null ? -1 : Nearest(cp, LevelOf(controller), ControllerAttach);
+            int controllerSegment = cp == null ? -1 : Nearest(cp, LevelOf(controller, floorParameter), ControllerAttach);
             if (controllerSegment < 0)
             {
                 problem = "кабель линии не подходит к прибору ближе чем на 3 м";
                 return null;
             }
-            var start = new Node { Point = cp, Level = LevelOf(controller) };
+            var start = new Node { Point = cp, Level = LevelOf(controller, floorParameter) };
             StopOnSegment(controllerSegment, cp, start);
 
             var transitions = new List<Node>();
@@ -145,11 +146,11 @@ namespace PluginForRevit2022.Core
                                      && (comment == null || DeviceMarkingOperations.HasComment(f, comment))))
             {
                 XYZ p = ((LocationPoint)transition.Location).Point;
-                long level = LevelOf(transition);
+                long level = LevelOf(transition, floorParameter);
                 int i = Nearest(p, level, Attach);
                 if (i < 0)
                 {
-                    // Этаж трассы (ADSK_Этаж, вручную) может не совпасть с высотой перехода — переход встаёт на ближайшую трассу
+                    // Этаж трассы (вручную, параметр из настроек) может не совпасть с высотой перехода — переход встаёт на ближайшую трассу
                     i = Nearest(p, -1, Attach);
                     if (i < 0) continue;
                     level = segments[i].level;
@@ -234,7 +235,7 @@ namespace PluginForRevit2022.Core
             return _levels.LastOrDefault(l => l.ProjectElevation <= p.Z + 50 / 304.8) ?? _levels.FirstOrDefault();
         }
 
-        private static long LevelOf(FamilyInstance element)
+        private static long LevelOf(FamilyInstance element, string floorParameter)
         {
             XYZ p = element.Location is LocationPoint lp ? lp.Point
                 : element.Location is LocationCurve lc ? (lc.Curve.GetEndPoint(0) + lc.Curve.GetEndPoint(1)) / 2 : null;
@@ -244,8 +245,8 @@ namespace PluginForRevit2022.Core
                 _levelsDoc = element.Document;
                 _levels = new FilteredElementCollector(element.Document).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => l.ProjectElevation).ToList();
             }
-            // ADSK_Этаж цифрой (у трасс заполняется вручную) — уровень с этим номером в имени
-            if (int.TryParse(element.LookupParameter("ADSK_Этаж")?.AsString()?.Trim(), out int floorNumber))
+            // Этаж цифрой (у трасс заполняется вручную) — уровень с этим номером в имени
+            if (int.TryParse(element.LookupParameter(floorParameter)?.AsString()?.Trim(), out int floorNumber))
             {
                 Level byNumber = _levels.FirstOrDefault(l => { var m = System.Text.RegularExpressions.Regex.Match(l.Name ?? "", @"-?\d+"); return m.Success && int.Parse(m.Value) == floorNumber; });
                 if (byNumber != null) return RevitIds.IdOf(byNumber.Id);

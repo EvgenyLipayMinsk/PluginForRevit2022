@@ -78,7 +78,7 @@ namespace PluginForRevit2022.Core
                 if (missing > 0 && !byConnection) problems.Add($"пропусков: {missing}");
                 if (repeated > 0) problems.Add($"повторов: {repeated}");
                 if (numbers.Count > DeviceMarkingOperations.LineCapacity) problems.Add("больше ёмкости");
-                string floorParam = DeviceMarkingOperations.FloorParameterOf(SystemOf(first));
+                string floorParam = MarkingSettings.CurrentFloorParameter();
                 List<string> floors = g.Value.Select(d => Read(d, floorParam)).Where(f => !string.IsNullOrEmpty(f)).Distinct()
                     .OrderBy(f => int.TryParse(f, out int n) ? n : int.MaxValue).ThenBy(f => f).ToList();
                 string[] address = (Read(first, Address) ?? "").Split('.');
@@ -251,6 +251,7 @@ namespace PluginForRevit2022.Core
                 transaction.Start();
                 foreach (LineMember member in shifted) Set(member.Device, Mark, (member.Number + devices.Count).ToString(), failures);
 
+                string floorParameter = MarkingSettings.CurrentFloorParameter();
                 string comments = anchor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
                 for (int i = 0; i < devices.Count; i++)
                 {
@@ -268,7 +269,7 @@ namespace PluginForRevit2022.Core
                     DeviceMarkingOperations.ClearForeign(device, system, failures);
                     Set(device, Bco, settings.BcoOf(device.Symbol.FamilyName), failures); // БЦО — только из «Настроек маркировки», как при маркировке
                     Set(device, Mark, (number + i).ToString(), failures);
-                    foreach (string name in new[] { "ADSK_Этаж", DeviceMarkingOperations.FloorParameterOf(system) }.Distinct())
+                    foreach (string name in new[] { MarkingSettings.DefaultFloorParameter, floorParameter }.Distinct())
                     {
                         if (!string.IsNullOrEmpty(Read(anchor, name)))
                         {

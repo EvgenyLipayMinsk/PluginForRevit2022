@@ -45,7 +45,7 @@ namespace ARBM.CableJournalExporter.Services
         /// Floor number of element location.
         /// <para>RU: Номер этажа размещения элемента.</para>
         /// </summary>
-        private const string Param_Floor = "ADSK_Этаж";
+        internal string FloorParameter { get; } = PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
 
         /// <summary>
         /// Alphanumeric system type code.
@@ -92,7 +92,7 @@ namespace ARBM.CableJournalExporter.Services
                 if (controllerId == null)
                     return null;
 
-                int? floorNumber = GetIntParameter(element, Param_Floor);
+                int? floorNumber = GetIntParameter(element, FloorParameter);
                 if (!floorNumber.HasValue)
                     return null;
 
@@ -128,7 +128,7 @@ namespace ARBM.CableJournalExporter.Services
             {
                 string buildingCode = GetStringParameter(element, Param_BuildingNumber); // строка
                 int? controllerNumber = GetIntParameter(element, Param_ControllerNumber);
-                int? floorNumber = GetIntParameter(element, Param_Floor);
+                int? floorNumber = GetIntParameter(element, FloorParameter);
                 int? lineNumber = GetIntParameter(element, Param_LineNumber);
                 int? deviceNumberInLine = GetIntParameter(element, Param_DeviceNumberInLine);
                 int? zkpsNumber = GetIntParameter(element, Param_ZkpsNumber);
@@ -187,7 +187,7 @@ namespace ARBM.CableJournalExporter.Services
             if (string.IsNullOrWhiteSpace(nameValue))
                 return null;
 
-            string[] parts = nameValue.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = nameValue.Split('.');
             if (parts.Length != 3)
                 return null;
 
@@ -195,11 +195,11 @@ namespace ARBM.CableJournalExporter.Services
             string deviceTypeCode = parts[1];
             string deviceNumberStr = parts[2];
 
-            // N: буквенно-цифровой код (только буквы и цифры)
-            if (!Regex.IsMatch(buildingCode, @"^[A-Za-z0-9]+$"))
+            // Корпус может содержать уточнение в скобках, например UO(OW).
+            if (!IsValidBuildingCode(buildingCode))
                 return null;
 
-            if (string.IsNullOrWhiteSpace(deviceTypeCode))
+            if (!Regex.IsMatch(deviceTypeCode, @"^[A-Za-z0-9]+$"))
                 return null;
 
             if (!int.TryParse(deviceNumberStr, out int deviceNumber))
@@ -212,6 +212,9 @@ namespace ARBM.CableJournalExporter.Services
                 DeviceNumber = deviceNumber
             };
         }
+
+        internal static bool IsValidBuildingCode(string code) =>
+            Regex.IsMatch(code ?? "", @"\A[A-Za-z0-9]+(?:\([A-Za-z0-9]+\))*\z");
 
         /// <summary>
         /// Gets integer parameter value from Revit element.

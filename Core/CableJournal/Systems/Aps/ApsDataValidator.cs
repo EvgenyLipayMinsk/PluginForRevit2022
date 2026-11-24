@@ -26,17 +26,25 @@ namespace ARBM.CableJournalExporter.Services
     /// </summary>
     public class ApsDataValidator
     {
+        private readonly ApsElementParser _parser;
+
+        public ApsDataValidator() : this(new ApsElementParser()) { }
+
+        internal ApsDataValidator(ApsElementParser parser)
+        {
+            _parser = parser;
+        }
         /// <summary>
         /// Валидирует контроллеры АПС (OST_ElectricalEquipment) и их параметры.
         ///
         /// Проверяет:
         /// 1. Заполнение параметра ARBM_ПС_Имя изделия (не пусто)
         /// 2. Формат ARBM_ПС_Имя изделия (N.CODE.M, где:
-        ///       N — буквенно-цифровой блок (любой длины),
+        ///       N — код корпуса, например M2 или UO(OW),
         ///       CODE — буквенно-цифровой код,
         ///       M — номер прибора (число))
         /// 3. Уникальность имён контроллеров
-        /// 4. Наличие параметра ADSK_Этаж (не пусто)
+        /// 4. Наличие номера этажа в параметре из настроек маркировки
         ///
         /// EN: Validates APS controllers and their parameters.
         /// </summary>
@@ -71,38 +79,9 @@ namespace ARBM.CableJournalExporter.Services
 
             // ---------------------------------------------------
             // 2. Проверка формата ARBM_ПС_Имя изделия: N.CODE.M
-            //    где N — буквы/цифры (любая комбинация)
+            //    где N — код корпуса
             // ---------------------------------------------------
-            var invalidFormats = controllers
-                .Where(c =>
-                {
-                    string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    if (string.IsNullOrWhiteSpace(name))
-                        return true;
-
-                    var parts = name.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length != 3)
-                        return true;
-
-                    string nPart = parts[0]; // теперь НЕ число
-                    string codePart = parts[1];
-                    string mPart = parts[2];
-
-                    // N: буквы/цифры, минимум 1 символ
-                    if (!Regex.IsMatch(nPart, @"^[A-Za-z0-9]+$"))
-                        return true;
-
-                    // CODE: буквы/цифры, минимум 1 символ
-                    if (!Regex.IsMatch(codePart, @"^[A-Za-z0-9]+$"))
-                        return true;
-
-                    // M: обязательно число
-                    if (!int.TryParse(mPart, out _))
-                        return true;
-
-                    return false;
-                })
-                .ToList();
+            var invalidFormats = controllers.Where(c => _parser.ParseApsControllerId(c) == null).ToList();
 
             if (invalidFormats.Any())
             {
@@ -116,15 +95,15 @@ namespace ARBM.CableJournalExporter.Services
             }
 
             // -----------------------------
-            // 3. Проверка ADSK_Этаж
+            // 3. Проверка параметра этажа
             // -----------------------------
             var missingLevel = controllers
-                .Where(c => string.IsNullOrWhiteSpace(c.LookupParameter("ADSK_Этаж")?.AsString()))
+                .Where(c => string.IsNullOrWhiteSpace(c.LookupParameter(_parser.FloorParameter)?.AsString()))
                 .ToList();
 
             if (missingLevel.Any())
             {
-                var msg = "⛔ У следующих контроллеров не заполнен параметр ADSK_Этаж:\n";
+                var msg = $"⛔ У следующих контроллеров не заполнен параметр «{_parser.FloorParameter}»:\n";
                 foreach (var ctrl in missingLevel)
                     msg += $"  ID {ctrl.Id}: {ctrl.Name}\n";
 

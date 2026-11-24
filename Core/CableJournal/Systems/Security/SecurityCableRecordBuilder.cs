@@ -192,7 +192,7 @@ namespace ARBM.CableJournalExporter.Services
             string cableCategory = DetermineCableCategory(loop);
             return new CableRecord
             {
-                // from ADSK_Этаж
+                // from the configured floor parameter
                 StartLevel = _parser.GetFloorNumber(ctrl.Controller)?.ToString(),
                 StartPoint = $"{ctrl.ControllerId.ControllerPrefix}.{ctrl.ControllerId.FloorNumber}.{ctrl.ControllerId.ControllerNumber}",
                 EndLevel = _parser.GetFloorNumber(device)?.ToString(),

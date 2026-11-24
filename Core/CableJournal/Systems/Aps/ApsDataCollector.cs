@@ -32,7 +32,7 @@ namespace ARBM.CableJournalExporter.Services
         public ApsDataCollector(ApsElementParser parser = null, ApsDataValidator validator = null)
         {
             _parser = parser ?? new ApsElementParser();
-            _validator = validator ?? new ApsDataValidator();
+            _validator = validator ?? new ApsDataValidator(_parser);
         }
 
         /// <summary>
@@ -76,12 +76,21 @@ namespace ARBM.CableJournalExporter.Services
                 if (connectionLine != null)
                 {
                     string[] parts = connectionLine.Split('|');
-                    allControllers = allControllers.Where(c =>
+                    var matchingControllers = allControllers.Where(c =>
                     {
                         var id = _parser.ParseApsControllerId(c);
                         return id != null && id.DeviceNumber.ToString() == parts[2] &&
                             string.Equals(id.BuildingNumber, parts[1], StringComparison.OrdinalIgnoreCase);
                     }).ToList();
+                    if (matchingControllers.Count == 0)
+                    {
+                        var names = allControllers.Select(c => c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString())
+                            .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().Take(10).ToList();
+                        string found = names.Count == 0 ? "нет приборов с заполненным именем" : string.Join(", ", names);
+                        TaskDialog.Show("Прибор АПС не найден",
+                            $"Ожидается прибор «{parts[1]}.ARK.{parts[2]}» с комментарием «{param}». Найденные имена в этой системе: {found}.");
+                    }
+                    allControllers = matchingControllers;
                 }
                 if (!allControllers.Any())
                     return result;
@@ -97,11 +106,11 @@ namespace ARBM.CableJournalExporter.Services
                     .Where(c =>
                     {
                         string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                        string floor = c.LookupParameter("ADSK_Этаж")?.AsString();
+                        string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
 
                         return !string.IsNullOrWhiteSpace(name) &&
                                name != null && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                               !string.IsNullOrWhiteSpace(floor);
+                               int.TryParse(floor, out _);
                     })
                     .ToList();
 
@@ -114,7 +123,7 @@ namespace ARBM.CableJournalExporter.Services
                 _skipped.Clear();
                 _skippedIds.Clear();
                 foreach (var c in allControllers.Except(controllersWithValidParams))
-                    _skipped.Add($"ПКП id {c.Id}: пустое «ARBM_ПС_Имя изделия» (или без ARK) или «ADSK_Этаж»");
+                    _skipped.Add($"ПКП id {c.Id}: пустое «ARBM_ПС_Имя изделия» (или без ARK) либо «{_parser.FloorParameter}» не заполнен числом");
 
                 if (cancel?.IsCancellationRequested == true)
                     throw new OperationCanceledException("Cancelled after validating controllers.");
@@ -180,6 +189,8 @@ namespace ARBM.CableJournalExporter.Services
                 if (!devices.Any())
                 {
                     ReportSkipped();
+                    if (connectionLine != null && _skipped.Count == 0)
+                        TaskDialog.Show("Шлейф АПС", $"Не найдены устройства шлейфа с комментарием «{param}» в категориях «Устройства данных» и «Пожарная сигнализация».");
                     return result;
                 }
 
@@ -276,9 +287,9 @@ namespace ARBM.CableJournalExporter.Services
         private readonly List<string> _skipped = new List<string>();
         private readonly HashSet<ElementId> _skippedIds = new HashSet<ElementId>();
 
-        private static string EmptyDeviceParams(FamilyInstance d)
+        private string EmptyDeviceParams(FamilyInstance d)
         {
-            var empty = new[] { "ARBM_Корпус", "ARBM_Номер прибора", "ADSK_Этаж", "ARBM_ПСБ_БЦО", "ARBM_Номер линии", "ARBM_SP_ElementMark" }
+            var empty = new[] { "ARBM_Корпус", "ARBM_Номер прибора", _parser.FloorParameter, "ARBM_ПСБ_БЦО", "ARBM_Номер линии", "ARBM_SP_ElementMark" }
                 .Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
             return empty.Count == 0 ? null : string.Join(", ", empty);
         }
@@ -314,7 +325,7 @@ namespace ARBM.CableJournalExporter.Services
                 var apsController = _parser.ParseController(controllerElement) as ApsController;
                 if (apsController == null)
                 {
-                    _skipped.Add($"ПКП id {controllerElement.Id} «{controllerElement.LookupParameter("ARBM_ПС_Имя изделия")?.AsString()}»: не разобрано имя или «ADSK_Этаж» не числом");
+                    _skipped.Add($"ПКП id {controllerElement.Id} «{controllerElement.LookupParameter("ARBM_ПС_Имя изделия")?.AsString()}»: не разобрано имя или «{_parser.FloorParameter}» не числом");
                     continue;
                 }
 
@@ -328,7 +339,7 @@ namespace ARBM.CableJournalExporter.Services
                         int? devController = GetIntParam(d, "ARBM_Номер прибора");
 
                         return !string.IsNullOrWhiteSpace(devBuilding) &&
-                               devBuilding.Equals(controllerId.BuildingNumber.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                               devBuilding.Trim().Equals(controllerId.BuildingNumber, StringComparison.OrdinalIgnoreCase) &&
                                devController == controllerId.DeviceNumber;
                     })
                     .ToList();
@@ -343,7 +354,7 @@ namespace ARBM.CableJournalExporter.Services
                     if (_parser.ParseDevice(d) is ApsDeviceInfo info) parsedDevices.Add(info);
                     else
                     {
-                        _skipped.Add($"устройство id {d.Id}: «ADSK_Этаж», номер линии или номер в линии не числом");
+                        _skipped.Add($"устройство id {d.Id}: «{_parser.FloorParameter}», номер линии или номер в линии не числом");
                         _skippedIds.Add(d.Id);
                     }
                 }
@@ -422,17 +433,17 @@ namespace ARBM.CableJournalExporter.Services
             foreach (var ctrl in invalidControllers)
             {
                 string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                string floor = ctrl.LookupParameter("ADSK_Этаж")?.AsString();
+                string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
 
-                errorMessage += $"ID: {ctrl.Id}\n";
+                errorMessage += $"Прибор «{name ?? ctrl.Name}» (ID {ctrl.Id})\n";
 
                 if (string.IsNullOrWhiteSpace(name))
                     errorMessage += $"  ⚠️  'ARBM_ПС_Имя изделия' — не заполнен\n";
                 else if (name == null || name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) < 0)
                     errorMessage += $"  ⚠️  'ARBM_ПС_Имя изделия' — не содержит 'ARK': {name}\n";
 
-                if (string.IsNullOrWhiteSpace(floor))
-                    errorMessage += $"  ⚠️  'ADSK_Этаж' — не заполнен\n";
+                if (!int.TryParse(floor, out _))
+                    errorMessage += $"  ⚠️  '{_parser.FloorParameter}' — укажите номер этажа целым числом (текущее значение: «{floor}»)\n";
 
                 errorMessage += "\n";
             }

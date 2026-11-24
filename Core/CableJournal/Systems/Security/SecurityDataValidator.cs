@@ -26,18 +26,19 @@ namespace ARBM.CableJournalExporter.Services
         /// 1. Заполнение параметра ARBM_ПС_Имя изделия (не пусто)
         /// 2. Формат ARBM_ПС_Имя изделия (ARK.-N.N или ARK.N.N)
         /// 3. Уникальность имён контроллеров в выборке
-        /// 4. Совпадение ADSK_Этаж с первым числом в ARBM_ПС_Имя изделия (FloorNumber)
+        /// 4. Совпадение номера этажа с первым числом в ARBM_ПС_Имя изделия (FloorNumber)
         /// 5. Наличие хотя бы одной петли у каждого контроллера
         /// </summary>
-        public static bool ValidateControllers(List<FamilyInstance> controllers, List<ControllerWithLoops> controllersWithLoops = null)
+        public static bool ValidateControllers(List<FamilyInstance> controllers, List<ControllerWithLoops> controllersWithLoops = null, string floorParameter = null)
         {
+            floorParameter = floorParameter ?? PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
             var errors = new List<string>();
             var controllerNames = new Dictionary<string, List<ElementId>>();
 
             foreach (var ctrl in controllers)
             {
                 string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                string floorParam = ctrl.LookupParameter("ADSK_Этаж")?.AsString();
+                string floorParam = ctrl.LookupParameter(floorParameter)?.AsString();
 
                 // Проверка 1: Параметр не заполнен (пусто, null или только пробелы)
                 if (string.IsNullOrWhiteSpace(name))
@@ -67,7 +68,7 @@ namespace ARBM.CableJournalExporter.Services
                 }
                 else
                 {
-                    // Проверка 4: Совпадение ADSK_Этаж с FloorNumber из ARBM_ПС_Имя изделия
+                    // Проверка 4: Совпадение номера этажа с FloorNumber из ARBM_ПС_Имя изделия
                     // Парсим имя для извлечения FloorNumber
                     string[] parts = name.Split('.');
                     if (parts.Length == 3 && int.TryParse(parts[1], out int floorFromName))
@@ -75,7 +76,7 @@ namespace ARBM.CableJournalExporter.Services
                         if (string.IsNullOrWhiteSpace(floorParam) || !int.TryParse(floorParam, out int floorFromParam))
                         {
                             errors.Add($"❌ Контроллер (ID: {ctrl.Id}):\n" +
-                                $"   Параметр 'ADSK_Этаж' не заполнен или содержит некорректное значение.\n" +
+                                $"   Параметр '{floorParameter}' не заполнен или содержит некорректное значение.\n" +
                                 $"   Текущее значение: '{floorParam}'\n" +
                                 $"   Ожидаемое значение: {floorFromName} (из ARBM_ПС_Имя изделия '{name}')");
                         }
@@ -84,7 +85,7 @@ namespace ARBM.CableJournalExporter.Services
                             errors.Add($"❌ Контроллер (ID: {ctrl.Id}):\n" +
                                 $"   Несовпадение этажей:\n" +
                                 $"   ARBM_ПС_Имя изделия: '{name}' → этаж {floorFromName}\n" +
-                                $"   ADSK_Этаж: '{floorParam}' → этаж {floorFromParam}\n" +
+                                $"   {floorParameter}: '{floorParam}' → этаж {floorFromParam}\n" +
                                 $"   Значения должны совпадать!");
                         }
                         else
@@ -161,14 +162,15 @@ namespace ARBM.CableJournalExporter.Services
         /// 3. Формат ARBM_SP_ElementMark (только цифры)
         /// 4. Уникальность комбинации БЦО + Адрес + Марка
         /// </summary>
-        public static bool ValidateDevices(List<FamilyInstance> devices)
+        public static bool ValidateDevices(List<FamilyInstance> devices, string floorParameter = null)
         {
+            floorParameter = floorParameter ?? PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
             var errors = new List<string>();
             var deviceKeys = new Dictionary<string, List<ElementId>>();
 
             foreach (var dev in devices)
             {
-                string floor = dev.LookupParameter("ADSK_Этаж")?.AsString();
+                string floor = dev.LookupParameter(floorParameter)?.AsString();
                 string bco = dev.LookupParameter("ARBM_ПСБ_БЦО")?.AsString();
                 string address = dev.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString();
                 string mark = dev.LookupParameter("ARBM_SP_ElementMark")?.AsString();
@@ -177,7 +179,7 @@ namespace ARBM.CableJournalExporter.Services
                 if (string.IsNullOrWhiteSpace(floor))
                 {
                     errors.Add($"❌ Устройство (ID: {dev.Id}):\n" +
-                        $"   Параметр 'ADSK_Этаж' не заполнен");
+                        $"   Параметр '{floorParameter}' не заполнен");
                 }
 
                 if (string.IsNullOrWhiteSpace(bco))

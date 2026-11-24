@@ -24,6 +24,7 @@ namespace PluginForRevit2022.Core
         {
             if (maxDistanceMm <= 0) throw new ArgumentException("maxDistanceMm должен быть больше нуля.");
             double maxFeet = maxDistanceMm / 304.8;
+            string floorParameter = MarkingSettings.CurrentFloorParameter();
 
             // Трассы линий
             var segments = new List<Segment>();
@@ -34,7 +35,7 @@ namespace PluginForRevit2022.Core
                 string line = LineOf(cable);
                 if (line == null || !(cable.Location is LocationCurve curve)) continue;
                 cablesPerLine[line] = cablesPerLine.TryGetValue(line, out int n) ? n + 1 : 1;
-                segments.Add(new Segment { Line = line, Level = LevelOf(cable), A = curve.Curve.GetEndPoint(0), B = curve.Curve.GetEndPoint(1) });
+                segments.Add(new Segment { Line = line, Level = LevelOf(cable, floorParameter), A = curve.Curve.GetEndPoint(0), B = curve.Curve.GetEndPoint(1) });
             }
             if (segments.Count == 0)
             {
@@ -70,7 +71,7 @@ namespace PluginForRevit2022.Core
             foreach (FamilyInstance device in devices)
             {
                 XYZ point = ((LocationPoint)device.Location).Point;
-                long level = LevelOf(device);
+                long level = LevelOf(device, floorParameter);
                 Dictionary<string, double> best = segments
                     .Where(s => s.Level == level || level == -1 || s.Level == -1)
                     .GroupBy(s => s.Line)
@@ -158,11 +159,11 @@ namespace PluginForRevit2022.Core
             return int.TryParse(controller, out int c) && int.TryParse(line, out int l) ? $"{c}.{l}" : null;
         }
 
-        private static long LevelOf(FamilyInstance element)
+        private static long LevelOf(FamilyInstance element, string floorParameter)
         {
-            // Как журнал: ADSK_Этаж цифрой → уровень с этим номером в имени (кабель под перекрытием Этажа 04
-            // с ADSK_Этаж = 3 — это Этаж 03); иначе «Уровень» и основа.
-            if (int.TryParse(element.LookupParameter("ADSK_Этаж")?.AsString()?.Trim(), out int floor))
+            // Как журнал: этаж из настроенного параметра → уровень с этим номером в имени (кабель под перекрытием Этажа 04
+            // с этажом 3 — это Этаж 03); иначе «Уровень» и основа.
+            if (int.TryParse(element.LookupParameter(floorParameter)?.AsString()?.Trim(), out int floor))
             {
                 Level byNumber = new FilteredElementCollector(element.Document).OfClass(typeof(Level)).Cast<Level>()
                     .FirstOrDefault(l => { var m = System.Text.RegularExpressions.Regex.Match(l.Name ?? "", @"-?\d+"); return m.Success && int.Parse(m.Value) == floor; });

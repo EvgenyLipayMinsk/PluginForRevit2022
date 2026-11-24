@@ -176,9 +176,9 @@ namespace ARBM.CableJournalExporter.Models
 
         /// <summary>
         /// Номер этажа, на котором расположено устройство.
-        /// Парсится из параметра ADSK_Этаж.
+        /// Берётся из параметра этажа, указанного в настройках маркировки.
         /// EN: Floor number where device is located.
-        /// Parsed from ADSK_Этаж parameter.
+        /// Read from the configured floor parameter.
         /// </summary>
         public int FloorNumber { get; set; }
 

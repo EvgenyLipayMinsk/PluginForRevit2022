@@ -16,18 +16,19 @@ namespace ARBM.CableJournalExporter.Services
         public SecurityDataCollector(SecurityElementParser parser)
         {
             _parser = parser;
+            _deviceParams = new[] { _parser.FloorParameter, "ARBM_ПСБ_БЦО", "ARBM_ПСБ_Адрес устройства", "ARBM_SP_ElementMark" };
         }
 
-        private static readonly string[] DeviceParams = { "ADSK_Этаж", "ARBM_ПСБ_БЦО", "ARBM_ПСБ_Адрес устройства", "ARBM_SP_ElementMark" };
+        private readonly string[] _deviceParams;
         private readonly List<string> _skipped = new List<string>();
 
         /// <summary>Все параметры прибора заполнены; иначе — в отчёт о пропущенных (в режиме «все системы» — только частично заполненные).</summary>
         private bool Complete(FamilyInstance d, bool reportIfPartial)
         {
-            var empty = DeviceParams.Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
+            var empty = _deviceParams.Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
             if (empty.Count == 0) return true;
             // «все системы»: в отчёт — только приборы с адресом, БЦО или номером (этаж заполнен у всего подряд)
-            if (!reportIfPartial || empty.Count < DeviceParams.Length - (empty.Contains("ADSK_Этаж") ? 0 : 1))
+            if (!reportIfPartial || empty.Count < _deviceParams.Length - (empty.Contains(_parser.FloorParameter) ? 0 : 1))
                 _skipped.Add($"прибор id {d.Id}: не заполнено {string.Join(", ", empty)}");
             return false;
         }
@@ -64,7 +65,7 @@ namespace ARBM.CableJournalExporter.Services
                 .Where(c =>
                 {
                     string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     // Если есть хотя бы один пустой параметр
                     return string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(floor);
@@ -78,7 +79,7 @@ namespace ARBM.CableJournalExporter.Services
                 foreach (var ctrl in controllersWithEmptyParams)
                 {
                     string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = ctrl.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     errorMessage += $"ID: {ctrl.Id}\n";
                     
@@ -86,7 +87,7 @@ namespace ARBM.CableJournalExporter.Services
                         errorMessage += $"  ⚠️  'ARBM_ПС_Имя изделия' — не заполнен\n";
                     
                     if (string.IsNullOrWhiteSpace(floor))
-                        errorMessage += $"  ⚠️  'ADSK_Этаж' — не заполнен\n";
+                        errorMessage += $"  ⚠️  '{_parser.FloorParameter}' — не заполнен\n";
                     
                     errorMessage += "\n";
                 }
@@ -102,7 +103,7 @@ namespace ARBM.CableJournalExporter.Services
                 .Where(c =>
                 {
                     string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     return !string.IsNullOrWhiteSpace(name)
                            && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0
@@ -114,7 +115,7 @@ namespace ARBM.CableJournalExporter.Services
                 return result;
 
             // ✅ ВАЛИДАЦИЯ: контроллеры (формат и уникальность)
-            if (!SecurityDataValidator.ValidateControllers(controllers))
+            if (!SecurityDataValidator.ValidateControllers(controllers, floorParameter: _parser.FloorParameter))
                 return result;
 
             // 3. Get all data devices (OST_DataDevices)
@@ -133,7 +134,7 @@ namespace ARBM.CableJournalExporter.Services
             }
 
             // ✅ ВАЛИДАЦИЯ: устройства
-            if (!SecurityDataValidator.ValidateDevices(devices))
+            if (!SecurityDataValidator.ValidateDevices(devices, _parser.FloorParameter))
                 return result;
 
             // 4. Parse all devices with their floor and address
@@ -146,7 +147,7 @@ namespace ARBM.CableJournalExporter.Services
                 })
                 .ToList();
             foreach (var x in parsedDevices.Where(x => !x.Floor.HasValue || x.Address == null))
-                _skipped.Add($"прибор id {x.Device.Id}: " + (!x.Floor.HasValue ? "«ADSK_Этаж» не числом" : "адрес не вида «прибор.шлейф»"));
+                _skipped.Add($"прибор id {x.Device.Id}: " + (!x.Floor.HasValue ? $"«{_parser.FloorParameter}» не числом" : "адрес не вида «прибор.шлейф»"));
             parsedDevices = parsedDevices.Where(x => x.Floor.HasValue && x.Address != null).ToList();
 
             // 5. For each controller, find matching devices on ALL floors
@@ -225,7 +226,7 @@ namespace ARBM.CableJournalExporter.Services
                 _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{x.Device.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
             ReportSkipped();
 
-            if (!SecurityDataValidator.ValidateControllers(controllers, result))
+            if (!SecurityDataValidator.ValidateControllers(controllers, result, _parser.FloorParameter))
                 return new List<ControllerWithLoops>();
 
             return result
@@ -260,7 +261,7 @@ namespace ARBM.CableJournalExporter.Services
                 .Where(c =>
                 {
                     string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     // Если есть хотя бы один пустой параметр
                     return string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(floor);
@@ -274,7 +275,7 @@ namespace ARBM.CableJournalExporter.Services
                 foreach (var ctrl in controllersWithEmptyParams)
                 {
                     string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = ctrl.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     errorMessage += $"ID: {ctrl.Id}\n";
                     
@@ -282,7 +283,7 @@ namespace ARBM.CableJournalExporter.Services
                         errorMessage += $"  ⚠️  'ARBM_ПС_Имя изделия' — не заполнен\n";
                     
                     if (string.IsNullOrWhiteSpace(floor))
-                        errorMessage += $"  ⚠️  'ADSK_Этаж' — не заполнен\n";
+                        errorMessage += $"  ⚠️  '{_parser.FloorParameter}' — не заполнен\n";
                     
                     errorMessage += "\n";
                 }
@@ -298,7 +299,7 @@ namespace ARBM.CableJournalExporter.Services
                 .Where(c =>
                 {
                     string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter("ADSK_Этаж")?.AsString();
+                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
 
                     return !string.IsNullOrWhiteSpace(name)
                            && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0
@@ -310,7 +311,7 @@ namespace ARBM.CableJournalExporter.Services
                 return result;
 
             // ✅ ВАЛИДАЦИЯ: контроллеры (формат и уникальность)
-            if (!SecurityDataValidator.ValidateControllers(controllers))
+            if (!SecurityDataValidator.ValidateControllers(controllers, floorParameter: _parser.FloorParameter))
                 return result;
 
             // 3. Collect devices (OST_DataDevices)
@@ -336,7 +337,7 @@ namespace ARBM.CableJournalExporter.Services
             }
 
             // ✅ ВАЛИДАЦИЯ: устройства
-            if (!SecurityDataValidator.ValidateDevices(devices))
+            if (!SecurityDataValidator.ValidateDevices(devices, _parser.FloorParameter))
                 return result;
 
             // 4. Parse all devices with their floor and address
@@ -349,7 +350,7 @@ namespace ARBM.CableJournalExporter.Services
                 })
                 .ToList();
             foreach (var x in parsedDevices.Where(x => !x.Floor.HasValue || x.Address == null))
-                _skipped.Add($"прибор id {x.Device.Id}: " + (!x.Floor.HasValue ? "«ADSK_Этаж» не числом" : "адрес не вида «прибор.шлейф»"));
+                _skipped.Add($"прибор id {x.Device.Id}: " + (!x.Floor.HasValue ? $"«{_parser.FloorParameter}» не числом" : "адрес не вида «прибор.шлейф»"));
             parsedDevices = parsedDevices.Where(x => x.Floor.HasValue && x.Address != null).ToList();
 
             // 5. Match controllers with devices (on ALL floors)
@@ -428,7 +429,7 @@ namespace ARBM.CableJournalExporter.Services
                 _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{x.Device.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
             ReportSkipped();
 
-            if (!SecurityDataValidator.ValidateControllers(controllers, result))
+            if (!SecurityDataValidator.ValidateControllers(controllers, result, _parser.FloorParameter))
                 return new List<ControllerWithLoops>();
 
             return result

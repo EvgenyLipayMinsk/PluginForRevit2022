@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
@@ -9,28 +11,67 @@ using Autodesk.Revit.DB;
 namespace PluginForRevit2022.Core
 {
     /// <summary>Настройка одного семейства. Публичный класс: на него напрямую привязана таблица окна.</summary>
-    public sealed class FamilySetting
+    public sealed class FamilySetting : INotifyPropertyChanged
     {
         public string Name { get; set; }
         public string Bco { get; set; }
-        /// <summary>Семейство применяется в линиях АПС.</summary>
-        public bool Aps { get; set; }
-        /// <summary>Семейство применяется в линиях СОТС.</summary>
-        public bool Security { get; set; }
-        /// <summary>Семейство применяется в линиях СОУЭ.</summary>
-        public bool Souye { get; set; }
-        /// <summary>Устройству заполняется ARBM_ЗКПС. null — по умолчанию: изоляторам и ИПР нет, остальным да.</summary>
-        public bool? Zkps { get; set; }
+        private bool _aps;
+        private bool _security;
+        private bool _souye;
+        private bool? _zkps;
 
-        /// <summary>Галочка «ЗКПС» в окне настроек (с учётом умолчания).</summary>
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        public bool Aps
+        {
+            get => _aps;
+            set
+            {
+                if (_aps == value) return;
+                SetFlag(ref _aps, value);
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ZkpsOn)));
+            }
+        }
+
+        public bool Security
+        {
+            get => _security;
+            set => SetFlag(ref _security, value);
+        }
+
+        public bool Souye
+        {
+            get => _souye;
+            set => SetFlag(ref _souye, value);
+        }
+
+        /// <summary>Явный выбор заполнения ARBM_ЗКПС, сохранённый в профиле.</summary>
+        public bool? Zkps
+        {
+            get => _zkps;
+            set
+            {
+                if (_zkps == value) return;
+                _zkps = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ZkpsOn)));
+            }
+        }
+
         [System.Web.Script.Serialization.ScriptIgnore]
         public bool ZkpsOn
         {
-            get => Zkps ?? ZkpsByDefault(Name);
+            get => Zkps ?? (Aps || ZkpsByDefault(Name));
             set => Zkps = value;
         }
 
-        /// <summary>Изоляторы шлейфа и ручные извещатели (ИПР) зоны контроля не обозначают — ЗКПС им не нужна.</summary>
+        private void SetFlag(ref bool field, bool value, [CallerMemberName] string property = null)
+        {
+            if (field == value) return;
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+        }
+
+        /// <summary>Умолчание для режима назначения зон по комментариям вне списка семейств АПС.</summary>
         public static bool ZkpsByDefault(string family) =>
             !System.Text.RegularExpressions.Regex.IsMatch(family ?? "", @"Изолятор|ИЗ-1|ИПР|Извещатель_Ручной", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
@@ -54,8 +95,8 @@ namespace PluginForRevit2022.Core
         public double SouyePercent { get; set; } = 40;
         /// <summary>Добавляется к каждой строке (кабельной линии) журнала, м.</summary>
         public double LineReserveM { get; set; }
-        /// <summary>Имя параметра этажа оповещателей СОУЭ. АПС и СОТС — всегда ADSK_Этаж (так требует их журнал).</summary>
-        public string FloorParameter { get; set; } = "ADSK_Этаж";
+        /// <summary>Имя параметра этажа для маркировки и кабельных журналов.</summary>
+        public string FloorParameter { get; set; } = MarkingSettings.DefaultFloorParameter;
 
         public void Validate()
         {
@@ -321,6 +362,14 @@ namespace PluginForRevit2022.Core
         {
             JournalSettings j = ReadAccount().Journal ?? new JournalSettings();
             return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM, FloorParameter = j.FloorParameter };
+        }
+
+        internal const string DefaultFloorParameter = "ADSK_Этаж";
+
+        internal static string CurrentFloorParameter()
+        {
+            string configured = CurrentJournal().FloorParameter;
+            return string.IsNullOrWhiteSpace(configured) ? DefaultFloorParameter : configured.Trim();
         }
 
         /// <summary>Запас на линию из профиля, м (добавляется к каждой строке журнала).</summary>

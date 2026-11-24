@@ -62,7 +62,7 @@ namespace PluginForRevit2022.Core
         public static string SharedParameterFilePath =>
             Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), SharedParameterFileName);
 
-        public static List<ParameterIssue> Check(Document doc)
+        public static List<ParameterIssue> Check(Document doc, bool includePower = true, bool includeDefaultFloor = true)
         {
             var bindings = new Dictionary<string, ElementBinding>(StringComparer.OrdinalIgnoreCase);
             DefinitionBindingMapIterator it = doc.ParameterBindings.ForwardIterator();
@@ -77,6 +77,8 @@ namespace PluginForRevit2022.Core
             var issues = new List<ParameterIssue>();
             foreach (var (name, guid, categories) in Required)
             {
+                if (!includePower && name == "ADSK_Номинальная мощность") continue;
+                if (!includeDefaultFloor && name == MarkingSettings.DefaultFloorParameter) continue;
                 var issue = new ParameterIssue { Name = name, Guid = guid, RequiredCategories = categories.ToList() };
                 if (!bindings.TryGetValue(name, out ElementBinding binding))
                 {

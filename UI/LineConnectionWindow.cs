@@ -24,9 +24,9 @@ namespace PluginForRevit2022
             public List<string> Order;
         }
 
-        internal LineConnectionWindow(IList<Line> lines, string accept, IntPtr owner, bool renumber = false)
+        internal LineConnectionWindow(IList<Line> lines, string accept, IntPtr owner, bool renumber = false, string title = "Порядок подключения АПС")
         {
-            Title = "Порядок подключения АПС";
+            Title = title;
             Width = 750;
             Height = 570;
             MinWidth = 550;

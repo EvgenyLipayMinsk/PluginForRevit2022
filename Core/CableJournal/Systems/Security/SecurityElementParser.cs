@@ -18,7 +18,7 @@ namespace ARBM.CableJournalExporter.Revit
     /// Поддерживаемые операции:
     /// • Парсинг идентификаторов контроллеров из параметра ARBM_ПС_Имя изделия (формат: PREFIX.FLOOR.CONTROLLER)
     /// • Парсинг адресов устройств из параметра ARBM_ПСБ_Адрес устройства (формат: CONTROLLER.LOOP)
-    /// • Извлечение номера этажа из параметра ADSK_Этаж
+    /// • Извлечение номера этажа из параметра этажа, указанного в настройках маркировки
     /// • Безопасное получение строковых параметров с обработкой null-значений
     /// 
     /// EN:
@@ -30,7 +30,7 @@ namespace ARBM.CableJournalExporter.Revit
     /// Supported operations:
     /// • Parsing controller identifiers from ARBM_ПС_Имя изделия parameter (format: PREFIX.FLOOR.CONTROLLER)
     /// • Parsing device addresses from ARBM_ПСБ_Адрес устройства parameter (format: CONTROLLER.LOOP)
-    /// • Extracting floor number from ADSK_Этаж parameter
+    /// • Extracting floor number from the configured floor parameter
     /// • Safe retrieval of string parameters with null-value handling
     /// 
     /// <remarks>
@@ -64,7 +64,7 @@ namespace ARBM.CableJournalExporter.Revit
         /// This parameter is used to determine the Revit level on which the element is located.
         /// The value can be either numeric (1, 2, 3...) or a textual level name.
         /// </summary>
-        private const string Param_Floor = "ADSK_Этаж";
+        internal string FloorParameter { get; } = PluginForRevit2022.Core.MarkingSettings.CurrentFloorParameter();
 
         /// <summary>
         /// Имя параметра Revit, содержащего адрес устройства в системе.
@@ -312,7 +312,7 @@ namespace ARBM.CableJournalExporter.Revit
         }
 
         /// <summary>
-        /// Извлекает номер этажа из параметра ADSK_Этаж элемента.
+        /// Извлекает номер этажа из параметра этажа, указанного в настройках маркировки элемента.
         /// 
         /// Этот метод используется для определения этажа (уровня в Revit), на котором размещен элемент.
         /// Номер этажа необходим для правильного построения кабельных цепей и маршрутизации.
@@ -323,13 +323,13 @@ namespace ARBM.CableJournalExporter.Revit
         /// 3) Если преобразование успешно, возвращает номер этажа
         /// 4) Если преобразование не удалось, возвращает null
         /// 
-        /// EN: Extracts the floor number from the ADSK_Этаж parameter of the element.
+        /// EN: Extracts the floor number from the configured floor parameter of the element.
         /// 
         /// This method is used to determine the floor (level in Revit) on which the element is located.
         /// The floor number is necessary for correct construction of cable chains and routing.
         /// 
         /// Extraction process:
-        /// 1) Gets the value of ADSK_Этаж parameter from the element
+        /// 1) Gets the value of the configured floor parameter from the element
         /// 2) Attempts to convert the string to an integer
         /// 3) If conversion is successful, returns the floor number
         /// 4) If conversion fails, returns null
@@ -364,7 +364,7 @@ namespace ARBM.CableJournalExporter.Revit
         {
             // Получаем значение параметра этажа как строку
             // EN: Get the floor parameter value as a string
-            string floorStr = GetStringParam(element, Param_Floor);
+            string floorStr = GetStringParam(element, FloorParameter);
             
             // Пытаемся преобразовать строку в число
             // EN: Attempt to convert the string to an integer

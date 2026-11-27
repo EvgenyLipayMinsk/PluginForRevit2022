@@ -1,4 +1,5 @@
-﻿using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
+﻿using PluginForRevit2022.Core;
+using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
 using ARBM.CableJournalExporter.Models;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -62,7 +63,7 @@ namespace ARBM.CableJournalExporter.Services
             // 1. Проверка уникальности имён
             // -----------------------------
             var names = controllers
-                .Select(c => c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString())
+                .Select(c => RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString())
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .ToList();
 
@@ -88,7 +89,7 @@ namespace ARBM.CableJournalExporter.Services
                 var msg = "⛔ Обнаружены контроллеры с неправильным форматом ARBM_ПС_Имя изделия:\n";
                 foreach (var ctrl in invalidFormats)
                 {
-                    string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString() ?? "(пусто)";
+                    string name = RevitText.FindParameter(ctrl, "ARBM_ПС_Имя изделия")?.AsString() ?? "(пусто)";
                     msg += $"  ID {ctrl.Id}: {name}\n";
                 }
                 errors.Add(msg);
@@ -98,7 +99,7 @@ namespace ARBM.CableJournalExporter.Services
             // 3. Проверка параметра этажа
             // -----------------------------
             var missingLevel = controllers
-                .Where(c => string.IsNullOrWhiteSpace(c.LookupParameter(_parser.FloorParameter)?.AsString()))
+                .Where(c => string.IsNullOrWhiteSpace(RevitText.FindParameter(c, _parser.FloorParameter)?.AsString()))
                 .ToList();
 
             if (missingLevel.Any())
@@ -148,17 +149,17 @@ namespace ARBM.CableJournalExporter.Services
                 .Where(d =>
                 {
                     // Проверяем ARBM_Номер прибора
-                    string controllerNum = d.LookupParameter("ARBM_Номер прибора")?.AsString();
+                    string controllerNum = RevitText.FindParameter(d, "ARBM_Номер прибора")?.AsString();
                     if (!IsNumeric(controllerNum))
                         return true;
 
                     // Проверяем ARBM_SP_ElementMark
-                    string deviceMark = d.LookupParameter("ARBM_SP_ElementMark")?.AsString();
+                    string deviceMark = RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString();
                     if (!IsNumeric(deviceMark))
                         return true;
 
                     // Проверяем ARBM_Номер линии
-                    string lineNum = d.LookupParameter("ARBM_Номер линии")?.AsString();
+                    string lineNum = RevitText.FindParameter(d, "ARBM_Номер линии")?.AsString();
                     if (!IsNumeric(lineNum))
                         return true;
 
@@ -172,12 +173,12 @@ namespace ARBM.CableJournalExporter.Services
                 foreach (var dev in invalidFormats)
                 {
                     msg += $"  ID {dev.Id}: {dev.Name}\n";
-                    if (!IsNumeric(dev.LookupParameter("ARBM_Номер прибора")?.AsString()))
-                        msg += $"    ARBM_Номер прибора: {dev.LookupParameter("ARBM_Номер прибора")?.AsString()}\n";
-                    if (!IsNumeric(dev.LookupParameter("ARBM_SP_ElementMark")?.AsString()))
-                        msg += $"    ARBM_SP_ElementMark: {dev.LookupParameter("ARBM_SP_ElementMark")?.AsString()}\n";
-                    if (!IsNumeric(dev.LookupParameter("ARBM_Номер линии")?.AsString()))
-                        msg += $"    ARBM_Номер линии: {dev.LookupParameter("ARBM_Номер линии")?.AsString()}\n";
+                    if (!IsNumeric(RevitText.FindParameter(dev, "ARBM_Номер прибора")?.AsString()))
+                        msg += $"    ARBM_Номер прибора: {RevitText.FindParameter(dev, "ARBM_Номер прибора")?.AsString()}\n";
+                    if (!IsNumeric(RevitText.FindParameter(dev, "ARBM_SP_ElementMark")?.AsString()))
+                        msg += $"    ARBM_SP_ElementMark: {RevitText.FindParameter(dev, "ARBM_SP_ElementMark")?.AsString()}\n";
+                    if (!IsNumeric(RevitText.FindParameter(dev, "ARBM_Номер линии")?.AsString()))
+                        msg += $"    ARBM_Номер линии: {RevitText.FindParameter(dev, "ARBM_Номер линии")?.AsString()}\n";
                 }
                 errors.Add(msg);
             }
@@ -187,11 +188,11 @@ namespace ARBM.CableJournalExporter.Services
                 .Select(d => new
                 {
                     Device = d,
-                    Address = $"{d.LookupParameter("ARBM_Корпус")?.AsString()}." +
-                             $"{d.LookupParameter("ARBM_Номер прибора")?.AsString()}." +
-                             $"{d.LookupParameter("ARBM_ПСБ_БЦО")?.AsString()}." +
-                             $"{d.LookupParameter("ARBM_Номер линии")?.AsString()}." +
-                             $"{d.LookupParameter("ARBM_SP_ElementMark")?.AsString()}"
+                    Address = $"{RevitText.FindParameter(d, "ARBM_Корпус")?.AsString()}." +
+                             $"{RevitText.FindParameter(d, "ARBM_Номер прибора")?.AsString()}." +
+                             $"{RevitText.FindParameter(d, "ARBM_ПСБ_БЦО")?.AsString()}." +
+                             $"{RevitText.FindParameter(d, "ARBM_Номер линии")?.AsString()}." +
+                             $"{RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString()}"
                 })
                 .ToList();
 

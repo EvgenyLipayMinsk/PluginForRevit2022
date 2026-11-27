@@ -82,7 +82,7 @@ namespace PluginForRevit2022.Core
                 List<string> floors = g.Value.Select(d => Read(d, floorParam)).Where(f => !string.IsNullOrEmpty(f)).Distinct()
                     .OrderBy(f => int.TryParse(f, out int n) ? n : int.MaxValue).ThenBy(f => f).ToList();
                 string[] address = (Read(first, Address) ?? "").Split('.');
-                bool aps = g.Key.StartsWith("aps|");
+                bool explicitLine = g.Key.StartsWith("aps|", StringComparison.Ordinal) || g.Key.StartsWith("souye|", StringComparison.Ordinal);
                 return new LineInfo
                 {
                     Key = g.Key,
@@ -90,8 +90,8 @@ namespace PluginForRevit2022.Core
                     System = titles[SystemOf(first)],
                     Building = Read(first, Building),
                     // СОТС: «прибор.шлейф»; СОУЭ: только номер шлейфа.
-                    Controller = aps ? Read(first, Controller) : (address.Length > 1 ? address[0] : ""),
-                    Line = aps ? Read(first, LineNumber) : (address.Length > 1 ? address[1] : address[0]),
+                    Controller = explicitLine ? Read(first, Controller) : (address.Length > 1 ? address[0] : ""),
+                    Line = explicitLine ? Read(first, LineNumber) : (address.Length > 1 ? address[1] : address[0]),
                     Devices = g.Value.Count,
                     Comment = DeviceMarkingOperations.CommentOf(first),
                     Numbers = min == max ? min.ToString() : $"{min}–{max}",
@@ -112,14 +112,17 @@ namespace PluginForRevit2022.Core
             }).ToList(),
         };
 
-        /// <summary>Линия устройства: АПС — корпус, прибор и линия; СОТС и СОУЭ — адрес. БЦО не входит: оно бывает разным у семейств.</summary>
+        /// <summary>АПС и новая СОУЭ: корпус, прибор, линия. СОТС и старая СОУЭ: адрес. БЦО различается у устройств одной линии.</summary>
         public static string KeyOf(Element device) => KeyOf(device, false);
 
         /// <param name="withUncommented">АПС без «Комментарии» тоже даёт ключ (с пустым комментарием в конце) —
         /// так «Диспетчер линий» показывает и снимает ручную разметку. Добавление и маркировка такие устройства не видят.</param>
         public static string KeyOf(Element device, bool withUncommented)
         {
+            if (SouyeLineIdentity.TryKey(device, out string souyeKey)) return souyeKey;
             string controller = Read(device, Controller), line = Read(device, LineNumber), address = Read(device, Address);
+            if (SouyeLineIdentity.IsDevice(device) && (!string.IsNullOrEmpty(controller) || !string.IsNullOrEmpty(line)))
+                return null; // незавершённая новая маркировка СОУЭ
             if (!string.IsNullOrEmpty(controller) && !string.IsNullOrEmpty(line))
             {
                 // АПС — линия вместе с комментарием, заданным при маркировке: без «Комментарии» (модули, разметка вручную)
@@ -221,9 +224,12 @@ namespace PluginForRevit2022.Core
                 ? members.OrderBy(m => m.Number).First()
                 : members.FirstOrDefault(m => m.Device.Id == after.Id) ?? throw new InvalidOperationException($"У устройства id {afterId} нет номера в линии.");
             FamilyInstance anchor = source.Device;
+            string linkedRack = SouyeLineIdentity.IsDevice(anchor) ? SouyeLineIdentity.LinkedRack(anchor) : null;
             int number = fixedAddress ?? (after == null ? source.Number : source.Number + 1);
 
             string system = SystemOf(anchor);
+            if (system == "souye" && devices.Any(device => !SouyeLineIdentity.IsDevice(device)))
+                throw new ArgumentException("СОУЭ: выберите устройства категории «Устройства вызова и оповещения».");
             // Правило маркировки: в линию входят только устройства с её «Комментарии»
             string lineComment = DeviceMarkingOperations.CommentOf(anchor);
             MarkingSettings settings = MarkingSettings.Load();
@@ -245,6 +251,20 @@ namespace PluginForRevit2022.Core
             if (fixedAddress.HasValue && occupied > DeviceMarkingOperations.LineCapacity) throw new InvalidOperationException("Превышена ёмкость линии.");
             if (occupied > DeviceMarkingOperations.LineCapacity) warnings.Add($"на линии {occupied} адресов при ёмкости {DeviceMarkingOperations.LineCapacity}");
 
+            var lineParameters = new[] { Building, Controller, LineNumber, Address }
+                .Where(name => name != Building || string.IsNullOrEmpty(linkedRack))
+                .ToDictionary(name => name, name => Read(anchor, name) ?? "");
+            foreach (FamilyInstance device in devices)
+            {
+                foreach (var entry in lineParameters)
+                {
+                    Parameter parameter = RevitText.FindParameter(device, entry.Key);
+                    if ((parameter?.AsString() ?? "").Trim() == entry.Value) continue;
+                    if (parameter == null || parameter.IsReadOnly)
+                        throw new InvalidOperationException($"Устройство ID {RevitIds.IdOf(device.Id)}: параметр «{entry.Key}» недоступен для включения в линию.");
+                }
+            }
+
             var failures = new List<string>();
             using (var transaction = new Transaction(doc, devices.Count == 1 ? "AerBIM: добавить устройство в линию" : "AerBIM: добавить устройства в линию"))
             {
@@ -252,35 +272,43 @@ namespace PluginForRevit2022.Core
                 foreach (LineMember member in shifted) Set(member.Device, Mark, (member.Number + devices.Count).ToString(), failures);
 
                 string floorParameter = MarkingSettings.CurrentFloorParameter();
+                string[] floorParameters = PluginParameterCheck.IsStandardFloor(floorParameter)
+                    ? new[] { floorParameter } : new[] { MarkingSettings.DefaultFloorParameter, floorParameter };
                 string comments = anchor.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString();
                 for (int i = 0; i < devices.Count; i++)
                 {
                     FamilyInstance device = devices[i];
-                    foreach (string name in new[] { Building, Controller, LineNumber, Address })
+                    foreach (var entry in lineParameters)
                     {
-                        // Как у линии, в том числе пустое: иначе оставшийся корпус переносимого устройства дал бы другой ключ линии
-                        string value = Read(anchor, name) ?? "";
-                        Parameter own = device.LookupParameter(name);
-                        if ((own?.AsString() ?? "").Trim() == value) continue;
-                        if (!fixedAddress.HasValue && (own == null || own.IsReadOnly)) continue;
-                        Set(device, name, value, failures);
+                        if ((Read(device, entry.Key) ?? "") != entry.Value)
+                            Set(device, entry.Key, entry.Value, failures);
                     }
                     // Перенос из линии другой системы: её параметры очищаются, иначе устройство осталось бы на старой линии.
-                    DeviceMarkingOperations.ClearForeign(device, system, failures);
+                    // При добавлении в старую линию СОУЭ сохраняется её адресное поле.
+                    if (system == "souye" && !key.StartsWith("souye|", StringComparison.Ordinal))
+                    {
+                        foreach (string name in new[] { Controller, LineNumber })
+                        {
+                            if (!string.IsNullOrEmpty(Read(device, name))) Set(device, name, "", failures);
+                        }
+                    }
+                    else DeviceMarkingOperations.ClearForeign(device, system, failures);
+                    if (SouyeLineIdentity.IsDevice(device)) SouyeLineIdentity.LinkRack(device, linkedRack);
                     Set(device, Bco, settings.BcoOf(device.Symbol.FamilyName), failures); // БЦО — только из «Настроек маркировки», как при маркировке
                     Set(device, Mark, (number + i).ToString(), failures);
-                    foreach (string name in new[] { MarkingSettings.DefaultFloorParameter, floorParameter }.Distinct())
+                    foreach (string name in floorParameters)
                     {
-                        if (!string.IsNullOrEmpty(Read(anchor, name)))
-                        {
-                            Set(device, name, DeviceMarkingOperations.FloorOf(doc, device, null) ?? Read(anchor, name), failures);
-                        }
+                        string anchorFloor = Read(anchor, name);
+                        if (!string.IsNullOrEmpty(anchorFloor))
+                            Set(device, name, DeviceMarkingOperations.FloorOf(doc, device, null) ?? anchorFloor, failures);
                     }
                     if (!string.IsNullOrEmpty(comments))
                     {
                         string error = RevitText.TrySet(device.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS), "Комментарии", comments);
                         if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, Комментарии: {error}");
                     }
+                    if (KeyOf(device, true) != key)
+                        failures.Add($"Устройство ID {RevitIds.IdOf(device.Id)} не удалось включить в выбранную линию. Проверьте параметры принадлежности и «Комментарии».");
                 }
                 if (newOrder != null && !dryRun && failures.Count == 0) LineConnectionOrder.Save(doc, key, newOrder);
                 Finish(transaction, dryRun, failures);
@@ -358,6 +386,7 @@ namespace PluginForRevit2022.Core
                     {
                         if (!string.IsNullOrEmpty(Read(device, name))) Set(device, name, "", failures);
                     }
+                    if (SouyeLineIdentity.IsDevice(device)) SouyeLineIdentity.LinkRack(device, null);
                     Parameter comments = device.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
                     if (!preserveAddresses && !string.IsNullOrEmpty(comments?.AsString()))
                     {
@@ -462,11 +491,12 @@ namespace PluginForRevit2022.Core
 
         private static string SystemOf(Element device)
         {
+            if (SouyeLineIdentity.TryKey(device, out _)) return "souye";
             if (!string.IsNullOrEmpty(Read(device, LineNumber))) return "aps";
             return string.IsNullOrEmpty(Read(device, Building)) ? "security" : "souye";
         }
 
-        private static string Read(Element element, string name) => element.LookupParameter(name)?.AsString()?.Trim();
+        private static string Read(Element element, string name) => RevitText.FindParameter(element, name)?.AsString()?.Trim();
 
         private static void Set(Element element, string name, string value, List<string> failures)
         {

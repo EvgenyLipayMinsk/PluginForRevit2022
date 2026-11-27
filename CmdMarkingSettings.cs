@@ -53,13 +53,25 @@ namespace PluginForRevit2022
         private readonly TextBox _souyePercent = Number();
         private readonly TextBox _lineReserve = Number();
         private readonly ComboBox _floorParameter = new ComboBox { MinWidth = 160, IsEditable = true, Margin = new Thickness(6, 0, 0, 0) };
+        private readonly ComboBox _souyeBuildingMode = new ComboBox
+        {
+            ItemsSource = new[] { "Разные корпуса", "Функциональные зоны" },
+            Margin = new Thickness(6, 0, 0, 0),
+            MinWidth = 170,
+        };
         private readonly TextBlock _other = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DarkGoldenrod, Margin = new Thickness(0, 4, 0, 0) };
         private List<FamilySetting> _rows;
         private bool _reloading;
+        private TextBox _invalidReserve;
+        private readonly Expander _journalOptions = new Expander
+        {
+            Header = "Параметры КЖ и СОУЭ", Margin = new Thickness(0, 8, 0, 0),
+        };
 
         public MarkingSettingsWindow(Document doc)
         {
             _doc = doc;
+            UI.AerBimAppearance.Apply(this);
             Title = "Настройки маркировки";
             Width = 940;
             MinWidth = 700;
@@ -73,55 +85,84 @@ namespace PluginForRevit2022
             _table.Columns.Add(new DataGridTextColumn { Header = "БЦО", Binding = new System.Windows.Data.Binding("Bco") { UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged }, Width = 120 });
 
             var bar = new WrapPanel(); // узкое окно — кнопки переносятся, а не обрезаются
-            bar.Children.Add(new TextBlock { Text = "Профиль", VerticalAlignment = VerticalAlignment.Center });
+            bar.Children.Add(UI.AerBimAppearance.Label("Профиль", _profiles));
             bar.Children.Add(_profiles);
-            bar.Children.Add(Tool("Добавить профиль", "Создать новый профиль", NewProfile));
-            bar.Children.Add(Tool("Сохранить", "Сохранить текущий профиль", SaveProfile));
-            bar.Children.Add(Tool("Удалить", "Удалить текущий профиль", DeleteProfile));
-            bar.Children.Add(Tool("Открыть файл…", "Подключить файл профиля, полученный от коллеги", OpenProfile));
+            var profileMenu = new ContextMenu();
+            foreach (var (title, action) in new (string Title, Action Action)[]
+            {
+                ("Добавить профиль…", NewProfile),
+                ("Открыть файл профиля…", OpenProfile),
+                ("Удалить профиль из списка…", DeleteProfile),
+            })
+            {
+                var item = new MenuItem { Header = title };
+                item.Click += (sender, args) => Guarded(action);
+                profileMenu.Items.Add(item);
+            }
+            var moreProfiles = Tool("Профили…", "Добавить, открыть или удалить профиль", () => profileMenu.IsOpen = true);
+            profileMenu.PlacementTarget = moreProfiles;
+            profileMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            bar.Children.Add(moreProfiles);
             bar.Children.Add(Tool("Обновить список", "Перечитать семейства проекта (например, после загрузки нового семейства)", Refresh));
             bar.Children.Add(Tool("Маркировка ЗКПС", "Выбрать семейства АПС для заполнения ARBM_ЗКПС", EditZkps));
             _profiles.SelectionChanged += (s, e) => SwitchProfile();
 
             var groupActions = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
             groupActions.Children.Add(ClearFlagsButton(_table, false));
-            groupActions.Children.Add(new TextBlock
-            {
-                Text = "Выделяйте семейства по названию с Ctrl или Shift.",
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 0, 0),
-            });
+
 
             var reserves = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
             reserves.Children.Add(new TextBlock { Text = "Запас кабеля, %:", VerticalAlignment = VerticalAlignment.Center });
             foreach (var (label, box) in new[] { ("АПС", _apsPercent), ("СОТС", _securityPercent), ("СОУЭ", _souyePercent) })
             {
-                reserves.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 4, 0) });
+                var caption = UI.AerBimAppearance.Label(label, box);
+                caption.Margin = new Thickness(10, 0, 4, 0);
+                reserves.Children.Add(caption);
                 reserves.Children.Add(box);
             }
-            reserves.Children.Add(new TextBlock { Text = "Запас на каждую линию, м", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 4, 0) });
+            var lineReserveLabel = UI.AerBimAppearance.Label("Запас на каждую линию, м", _lineReserve);
+            lineReserveLabel.Margin = new Thickness(18, 0, 4, 0);
+            reserves.Children.Add(lineReserveLabel);
             reserves.Children.Add(_lineReserve);
 
             var floor = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-            floor.Children.Add(new TextBlock { Text = "Параметр этажа:", VerticalAlignment = VerticalAlignment.Center });
+            floor.Children.Add(UI.AerBimAppearance.Label("Параметр этажа", _floorParameter));
             _floorParameter.ToolTip = "Список — параметры проекта, в имени которых есть «этаж». Можно вписать имя вручную.";
             floor.Children.Add(_floorParameter);
-            floor.Children.Add(new TextBlock { Text = "для маркировки и КЖ АПС, СОТС и СОУЭ", Foreground = System.Windows.Media.Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) });
+
 
             var top = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             top.Children.Add(bar);
-            top.Children.Add(reserves);
-            top.Children.Add(floor);
-            top.Children.Add(new TextBlock { Text = "В линии каждой системы участвуют только семейства с её галочкой. Без БЦО семейство не маркируется: маркировка остановится и покажет такие семейства. Чтобы передать настройки, отправьте файл профиля.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+
+            var souyeMode = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            souyeMode.Children.Add(UI.AerBimAppearance.Label("Использование корпуса в СОУЭ", _souyeBuildingMode));
+            _souyeBuildingMode.ToolTip = "В режиме функциональных зон код зоны необязателен. Стойка определяется по выбранному экземпляру.";
+            souyeMode.Children.Add(_souyeBuildingMode);
+            var journalOptions = new StackPanel { Margin = new Thickness(8, 0, 0, 4) };
+            journalOptions.Children.Add(reserves);
+            journalOptions.Children.Add(floor);
+            journalOptions.Children.Add(souyeMode);
+            _journalOptions.Content = journalOptions;
+            top.Children.Add(_journalOptions);
             top.Children.Add(_other);
             top.Children.Add(groupActions);
 
             var layout = new Grid { Margin = new Thickness(12) };
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition());
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetRow(_table, 1);
             layout.Children.Add(top);
             layout.Children.Add(_table);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+            var close = Tool("Закрыть", "Закрыть окно", Close);
+            close.IsCancel = true;
+            var save = Tool("Сохранить", "Сохранить текущий профиль", SaveProfile);
+            UI.AerBimAppearance.Primary(this, save);
+            actions.Children.Add(close);
+            actions.Children.Add(save);
+            Grid.SetRow(actions, 2);
+            layout.Children.Add(actions);
             Content = layout;
             Reload();
         }
@@ -230,7 +271,9 @@ namespace PluginForRevit2022
                 ShowInTaskbar = false,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
+            UI.AerBimAppearance.Apply(window);
             var apply = new Button { Content = "Применить", IsDefault = true, MinWidth = 95, Margin = new Thickness(8, 0, 0, 0) };
+            UI.AerBimAppearance.Primary(window, apply);
             apply.Click += (s, e) => window.DialogResult = true;
             var cancel = new Button { Content = "Отмена", IsCancel = true, MinWidth = 85 };
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -270,6 +313,7 @@ namespace PluginForRevit2022
             _lineReserve.Text = Text(journal.LineReserveM);
             _floorParameter.ItemsSource = MarkingSettings.FloorParameters(_doc);
             _floorParameter.Text = string.IsNullOrWhiteSpace(journal.FloorParameter) ? MarkingSettings.DefaultFloorParameter : journal.FloorParameter;
+            _souyeBuildingMode.SelectedIndex = journal.SouyeFunctionalZones ? 1 : 0;
             _rows = MarkingSettings.ForDocument(_doc);
             _table.ItemsSource = _rows;
             List<string> other = MarkingSettings.OtherCategoryFamilies(_doc);
@@ -288,6 +332,7 @@ namespace PluginForRevit2022
 
         private void Store()
         {
+            _invalidReserve = null;
             _table.CommitEdit(DataGridEditingUnit.Row, true);
             MarkingSettings.Save(_rows, new JournalSettings
             {
@@ -296,6 +341,7 @@ namespace PluginForRevit2022
                 SouyePercent = Read(_souyePercent),
                 LineReserveM = Read(_lineReserve),
                 FloorParameter = string.IsNullOrWhiteSpace(_floorParameter.Text) ? MarkingSettings.DefaultFloorParameter : _floorParameter.Text.Trim(),
+                SouyeFunctionalZones = _souyeBuildingMode.SelectedIndex == 1,
             });
         }
 
@@ -308,12 +354,21 @@ namespace PluginForRevit2022
         private void SwitchProfile()
         {
             if (_reloading || !(_profiles.SelectedItem is string name)) return;
-            Guarded(() =>
+            string current = MarkingSettings.Current().Name;
+            try
             {
-                Store(); // правки не теряются при переключении
+                Store();
                 MarkingSettings.Select(name);
                 Reload();
-            });
+            }
+            catch (Exception ex)
+            {
+                if (MarkingSettings.Current().Name != current) MarkingSettings.Select(current);
+                _reloading = true;
+                try { _profiles.SelectedItem = current; }
+                finally { _reloading = false; }
+                ShowError(ex);
+            }
         }
 
         private void NewProfile()
@@ -346,12 +401,14 @@ namespace PluginForRevit2022
 
         private static string Text(double value) => value.ToString(System.Globalization.CultureInfo.CurrentCulture);
 
-        private static double Read(TextBox box)
+        private double Read(TextBox box)
         {
             string text = box.Text.Trim().Replace(',', '.');
-            if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value))
+            if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value)
+                || double.IsNaN(value) || double.IsInfinity(value) || value < 0)
             {
-                throw new ArgumentException("Запасы кабеля должны быть числами.");
+                _invalidReserve = box;
+                throw new ArgumentException("Укажите неотрицательное число для запаса кабеля.");
             }
             return value;
         }
@@ -364,8 +421,17 @@ namespace PluginForRevit2022
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, Title);
+                ShowError(ex);
             }
+        }
+
+        private void ShowError(Exception error)
+        {
+            MessageBox.Show(this, error.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (_invalidReserve == null) return;
+            _journalOptions.IsExpanded = true;
+            _invalidReserve.Focus();
+            _invalidReserve.SelectAll();
         }
     }
 }

@@ -19,6 +19,11 @@ namespace PluginForRevit2022.Core
         public string System { get; set; }
         /// <summary>Значение параметра «Комментарии», по которому отбираются элементы.</summary>
         public string Comments { get; set; }
+        public long? ControllerElementId { get; set; }
+        public string ApsLineKey { get; set; }
+        public bool PreviewConnectionOrder { get; set; }
+        public List<string> ConnectionOrder { get; set; }
+        public bool AcceptFallbackLengths { get; set; }
         /// <summary>СОУЭ: eom или adsk.</summary>
         public string ParameterStandard { get; set; }
         public string Form { get; set; }
@@ -43,7 +48,32 @@ namespace PluginForRevit2022.Core
             {
                 throw new ArgumentException("system: security, aps или souye.");
             }
-            if (system != "security" && string.IsNullOrWhiteSpace(request.Comments))
+            if (!string.IsNullOrWhiteSpace(request.ApsLineKey))
+            {
+                if (system != "aps") throw new ArgumentException("apsLineKey используется только для АПС.");
+                var parts = request.ApsLineKey.Split(new[] { '|' }, 5);
+                if (parts.Length != 5 || !string.Equals(parts[0], "aps", StringComparison.OrdinalIgnoreCase) ||
+                    !int.TryParse(parts[2], out _) || !int.TryParse(parts[3], out _) || string.IsNullOrWhiteSpace(parts[4]))
+                    throw new ArgumentException("apsLineKey: используйте ключ линии АПС из list_marked_lines.");
+                if (!string.IsNullOrWhiteSpace(request.Comments) &&
+                    !string.Equals(request.Comments.Trim(), parts[4].Trim(), StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("comments не совпадает с комментарием в apsLineKey.");
+                request.Comments = parts[4].Trim();
+                request.ApsLineKey = DeviceLineOperations.ApsKey(parts[1], parts[2], parts[3], request.Comments);
+                if (request.PreviewConnectionOrder)
+                {
+                    if (!request.DryRun || request.ConnectionOrder?.Count > 0)
+                        throw new ArgumentException("Для предложения порядка оставьте dryRun=true и не передавайте connectionOrder.");
+                    return PreviewApsConnection(doc, request);
+                }
+                if (request.ConnectionOrder == null || request.ConnectionOrder.Count == 0)
+                    throw new ArgumentException("Передайте подтверждённый connectionOrder или запросите previewConnectionOrder=true.");
+            }
+            else if (request.PreviewConnectionOrder || request.ConnectionOrder?.Count > 0 || request.AcceptFallbackLengths)
+            {
+                throw new ArgumentException("Для работы с порядком подключения укажите apsLineKey.");
+            }
+            if (system != "security" && string.IsNullOrWhiteSpace(request.Comments) && !(system == "souye" && request.ControllerElementId.HasValue))
             {
                 throw new ArgumentException("Укажите comments — значение параметра «Комментарии» (например, АПС).");
             }
@@ -74,9 +104,25 @@ namespace PluginForRevit2022.Core
             var messages = new List<string>();
             List<CableRecord> records = Calculate(doc, request, messages);
 
+            bool connectionSaved = false;
             if (!request.DryRun)
             {
-                exporter.ExportCableRecords(request.TemplatePath, request.SavePath, records);
+                if (request.ApsLineKey == null)
+                    exporter.ExportCableRecords(request.TemplatePath, request.SavePath, records);
+                else
+                {
+                    if (!request.AcceptFallbackLengths && records.Any(record => record.IsFallbackForLength))
+                        throw new InvalidOperationException("Некоторые длины рассчитаны с обходом разрыва или по прямой. Проверьте результат dryRun и для выгрузки укажите acceptFallbackLengths=true.");
+                    using (var group = new TransactionGroup(doc, "AerBIM: подтвердить порядок и выгрузить КЖ"))
+                    {
+                        if (group.Start() != TransactionStatus.Started)
+                            throw new InvalidOperationException("Не удалось начать сохранение порядка подключения.");
+                        DeviceLineOperations.SaveConnectionOrder(doc, request.ApsLineKey, request.ConnectionOrder);
+                        exporter.ExportCableRecords(request.TemplatePath, request.SavePath, records);
+                        connectionSaved = group.Assimilate() == TransactionStatus.Committed;
+                        if (!connectionSaved) messages.Add("Журнал выгружен. Revit не сохранил порядок подключения в модели.");
+                    }
+                }
             }
 
             return new Dictionary<string, object>
@@ -89,6 +135,8 @@ namespace PluginForRevit2022.Core
                 ["sample"] = records.Take(20).Select(Row).ToList(),
                 ["messages"] = messages.Distinct().Take(100).ToList(),
                 ["savedTo"] = request.DryRun ? null : request.SavePath,
+                ["apsLineKey"] = request.ApsLineKey,
+                ["connectionOrderSaved"] = connectionSaved,
                 ["log"] = ExecutionLogger.GetLogPath(),
                 ["elapsedMs"] = timer.ElapsedMilliseconds,
                 ["summary"] = request.DryRun
@@ -101,7 +149,7 @@ namespace PluginForRevit2022.Core
         {
             string system = (request.System ?? "").Trim().ToLowerInvariant();
             if (system != "aps" && system != "security" && system != "souye") throw new ArgumentException("system: aps, security, souye.");
-            if (system != "security" && string.IsNullOrWhiteSpace(request.Comments)) throw new ArgumentException("Укажите comments.");
+            if (system != "security" && string.IsNullOrWhiteSpace(request.Comments) && !(system == "souye" && request.ControllerElementId.HasValue)) throw new ArgumentException("Укажите comments.");
             List<CableRecord> records;
             using (JournalDialog.Capture(messages))
             using (var cancel = new TimeoutCancel())
@@ -128,9 +176,23 @@ namespace PluginForRevit2022.Core
             {
                 case "aps":
                 {
-                    var controllers = new ApsDataCollector().CollectApsControllersWithLoopsByParam(doc, comments, cancel);
-                    if (controllers == null || controllers.Count == 0) return null;
-                    return new ApsCableRecordBuilder(new ApsElementParser(), doc, LengthMode.Route, MarkingSettings.CableFactor("aps")).Build(controllers, comments, cancel);
+                    var parser = new ApsElementParser();
+                    List<ApsControllerWithLoops> controllers;
+                    if (request.ApsLineKey == null)
+                    {
+                        controllers = new ApsDataCollector(parser).CollectApsControllersWithLoopsByParam(doc, comments, cancel);
+                        if (controllers == null || controllers.Count == 0) return null;
+                    }
+                    else
+                    {
+                        var (controller, loop, devices) = ApsConnection(doc, request, parser, cancel, messages);
+                        var ordered = LineConnectionOrder.Ordered(devices, request.ConnectionOrder);
+                        var byId = loop.Devices.ToDictionary(device => device.BaseInfo.Element.UniqueId);
+                        loop.Devices = ordered.Select(device => byId[device.UniqueId]).ToList();
+                        controller.Loops = new List<ApsLoopGroup> { loop };
+                        controllers = new List<ApsControllerWithLoops> { controller };
+                    }
+                    return new ApsCableRecordBuilder(parser, doc, LengthMode.Route, MarkingSettings.CableFactor("aps")).Build(controllers, comments, cancel);
                 }
                 case "souye":
                     return BuildSouye(doc, request, comments, cancel, messages);
@@ -147,6 +209,67 @@ namespace PluginForRevit2022.Core
             }
         }
 
+        private static (ApsControllerWithLoops controller, ApsLoopGroup loop, List<FamilyInstance> devices) ApsConnection(
+            Document doc, CableJournalRequest request, ApsElementParser parser, CancellationMonitor cancel, List<string> messages)
+        {
+            string key = request.ApsLineKey;
+            var controllers = new ApsDataCollector(parser).CollectApsControllersWithLoopsByParam(doc, request.Comments, cancel, key)
+                ?? new List<ApsControllerWithLoops>();
+            var candidates = (from controller in controllers
+                              from loop in controller.Loops
+                              where loop.Devices.Any(device => DeviceLineOperations.KeyOf(device.BaseInfo.Element) == key)
+                              select new { controller, loop }).ToList();
+            if (candidates.Count != 1)
+                throw new InvalidOperationException((candidates.Count == 0 ? "Шлейф не найден у прибора." : "Найдено несколько приборов для одного шлейфа.") +
+                    (messages.Count == 0 ? "" : " " + string.Join(" | ", messages.Distinct().Take(10))));
+            var match = candidates[0];
+            var devices = match.loop.Devices.Select(device => (FamilyInstance)device.BaseInfo.Element).ToList();
+            if (!new HashSet<string>(DeviceLineOperations.DevicesOf(doc, key).Select(device => device.UniqueId))
+                .SetEquals(devices.Select(device => device.UniqueId)))
+                throw new InvalidOperationException("Часть устройств линии не прошла проверку КЖ. " + string.Join(" | ", messages.Distinct().Take(10)));
+            return (match.controller, match.loop, devices);
+        }
+
+        private static Dictionary<string, object> PreviewApsConnection(Document doc, CableJournalRequest request)
+        {
+            var messages = new List<string>();
+            using (JournalDialog.Capture(messages))
+            using (var cancel = new TimeoutCancel())
+            {
+                var (controller, loop, devices) = ApsConnection(doc, request, new ApsElementParser(), cancel.Monitor, messages);
+                var stored = LineConnectionOrder.Read(doc);
+                bool hasSavedOrder = stored.TryGetValue(request.ApsLineKey, out var entry);
+                var byId = devices.ToDictionary(device => device.UniqueId);
+                var retained = hasSavedOrder
+                    ? entry.Order.Distinct().Where(byId.ContainsKey).Select(id => byId[id]).ToList()
+                    : null;
+                bool savedOrderIsCurrent = retained != null && retained.Count == devices.Count && retained.Count == entry.Order.Count;
+                var suggestion = savedOrderIsCurrent
+                    ? new LineConnectionOrder.Suggestion { Devices = retained, Hint = "Показан сохранённый порядок. Сверьте его с трассой." }
+                    : LineConnectionOrder.Suggest(doc, controller.Controller.Element, devices, request.ApsLineKey, retained, true, false);
+                try { LineConnectionOrder.ValidateAddresses(devices); }
+                catch (ArgumentException ex) { messages.Add(ex.Message); }
+                return new Dictionary<string, object>
+                {
+                    ["dryRun"] = true,
+                    ["apsLineKey"] = request.ApsLineKey,
+                    ["ring"] = loop.TypeLoop == TypeLoop.Annular,
+                    ["savedOrderIsCurrent"] = savedOrderIsCurrent,
+                    ["suggestedOrder"] = suggestion.Devices.Select(device => device.UniqueId).ToList(),
+                    ["devices"] = devices.Select(device => new
+                    {
+                        uniqueId = device.UniqueId,
+                        id = RevitIds.IdOf(device.Id),
+                        address = LineConnectionOrder.Address(device),
+                        estimated = suggestion.Estimated.Contains(device.UniqueId),
+                        needsReview = suggestion.Review.Contains(device.UniqueId),
+                    }).ToList(),
+                    ["hint"] = suggestion.Hint,
+                    ["messages"] = messages.Distinct().Take(100).ToList(),
+                };
+            }
+        }
+
         private static List<CableRecord> BuildSouye(Document doc, CableJournalRequest request, string comments,
                                                     CancellationMonitor cancel, List<string> messages)
         {
@@ -157,19 +280,27 @@ namespace PluginForRevit2022.Core
             }
             var mapper = new SouyeParameterMapper(standard == "eom" ? SouyeParameterStandard.Eom : SouyeParameterStandard.Adsk,
                 MarkingSettings.CurrentFloorParameter()); // этаж — из «Настроек маркировки»
-            var collected = new SouyeDataCollector(new SouyeElementParser(mapper)).Collect(doc, comments);
+            Element rack = null;
+            if (request.ControllerElementId.HasValue)
+            {
+                rack = doc.GetElement(RevitIds.ToElementId(request.ControllerElementId.Value));
+                if (rack == null || !SouyeLineIdentity.IsRack(rack))
+                    throw new ArgumentException("controllerElementId должен указывать на стойку СОУЭ категории «Электрооборудование».");
+                if (string.IsNullOrWhiteSpace(comments)) comments = DeviceMarkingOperations.CommentOf(rack);
+            }
+            var collected = new SouyeDataCollector(new SouyeElementParser(mapper)).Collect(doc, comments, rack);
             if (!collected.IsSuccess)
             {
                 messages.Add(collected.ErrorMessage);
                 return null;
             }
-            List<string> errors = new SouyeDataValidator(mapper).Validate(collected.Data);
+            List<string> errors = new SouyeDataValidator(mapper).ValidateGroups(collected.Groups);
             if (errors.Count > 0)
             {
                 messages.AddRange(errors);
                 return null;
             }
-            var built = new SouyeCableRecordBuilder(doc, LengthMode.Route, MarkingSettings.CableFactor("souye")).Build(collected.Data, comments, cancel);
+            var built = new SouyeCableRecordBuilder(doc, LengthMode.Route, MarkingSettings.CableFactor("souye")).Build(collected.Groups, cancel);
             if (built == null || !built.IsSuccess)
             {
                 messages.Add(built?.ErrorMessage ?? "Ошибка при построении записей: результат null.");

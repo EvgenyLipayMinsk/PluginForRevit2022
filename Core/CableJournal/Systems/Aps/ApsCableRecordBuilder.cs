@@ -1,4 +1,5 @@
-﻿using System;
+using PluginForRevit2022.Core;
+using System;
 using System.Collections.Generic;
 using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
@@ -57,28 +58,11 @@ namespace ARBM.CableJournalExporter.Services
         public List<CableRecord> Build(List<ApsControllerWithLoops> controllers, string param = "", CancellationMonitor cancel = null)
         {
             if (controllers == null || controllers.Count == 0) return new List<CableRecord>();
-            var loops = controllers.SelectMany(c => c.Loops.Select(l => new { Controller = c, Loop = l })).ToList();
             var rows = new Dictionary<ApsLoopGroup, List<CableRecord>>();
-            var sequential = controllers.Select(c => WithLoops(c, c.Loops.Where(l => l.ConnectionLineKey == null)))
-                .Where(c => c.Loops.Count > 0).ToList();
-            if (sequential.Count > 0 && !BuildGroup(sequential, param, cancel, rows)) return new List<CableRecord>();
-            try
-            {
-                foreach (var item in loops.Where(x => x.Loop.ConnectionLineKey != null))
-                {
-                    string key = item.Loop.ConnectionLineKey;
-                    _routeCalc.Inner.ApsRouteFilter = route => route.Location is LocationCurve &&
-                        PluginForRevit2022.Core.LineConnectionOrder.IsRoute(route, key);
-                    if (!BuildGroup(new List<ApsControllerWithLoops> { WithLoops(item.Controller, new[] { item.Loop }) }, param, cancel, rows))
-                        return new List<CableRecord>();
-                }
-                return loops.Where(x => rows.ContainsKey(x.Loop)).SelectMany(x => rows[x.Loop]).ToList();
-            }
-            finally { _routeCalc.Inner.ApsRouteFilter = null; }
+            if (!BuildGroup(controllers, param, cancel, rows)) return new List<CableRecord>();
+            return controllers.SelectMany(controller => controller.Loops)
+                .Where(rows.ContainsKey).SelectMany(loop => rows[loop]).ToList();
         }
-
-        private static ApsControllerWithLoops WithLoops(ApsControllerWithLoops source, IEnumerable<ApsLoopGroup> loops) =>
-            new ApsControllerWithLoops { Controller = source.Controller, ControllerId = source.ControllerId, Loops = loops.ToList() };
 
         private bool BuildGroup(List<ApsControllerWithLoops> controllers, string param, CancellationMonitor cancel,
             Dictionary<ApsLoopGroup, List<CableRecord>> rows)
@@ -96,6 +80,7 @@ namespace ARBM.CableJournalExporter.Services
             _routeCalc.BuildGraphsByLevel(_doc, controllers, param, cancel);
 
             // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
+            if (_routeCalc.Inner.TunnelError != null) throw new CableWalk.TunnelException(_routeCalc.Inner.TunnelError);
             if (_routeCalc.BuildError != null) return false;
 
             cancel?.ClearCurrentOperation();
@@ -337,6 +322,7 @@ namespace ARBM.CableJournalExporter.Services
                 if (cancel?.IsCancellationRequested == true)
                     throw new OperationCanceledException("Cancelled after route computation.");
 
+                if (_routeCalc.Inner.TunnelError != null) throw new CableWalk.TunnelException(_routeCalc.Inner.TunnelError);
                 if (double.IsInfinity(feet))
                 {
                     isFallbackForLength = true;

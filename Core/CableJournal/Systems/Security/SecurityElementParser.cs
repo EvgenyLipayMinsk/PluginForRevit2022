@@ -1,4 +1,5 @@
-﻿using ARBM.CableJournalExporter.Models;
+﻿using PluginForRevit2022.Core;
+using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using Autodesk.Revit.DB;
 using System;
@@ -442,7 +443,7 @@ namespace ARBM.CableJournalExporter.Revit
         {
             // Ищем параметр по имени в элементе
             // EN: Search for the parameter by name in the element
-            var p = e.LookupParameter(paramName);
+            var p = RevitText.FindParameter(e, paramName);
             
             // Если параметр найден, возвращаем его строковое значение
             // Если параметр не найден, возвращаем null (благодаря null-conditional оператору ?.)

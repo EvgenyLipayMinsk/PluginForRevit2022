@@ -16,6 +16,7 @@ namespace PluginForRevit2022.Core
         /// <summary>aps, security или souye.</summary>
         public string System { get; set; }
         public string Building { get; set; }
+        internal bool FunctionalZones { get; set; }
         public string Controller { get; set; }
         public string Bco { get; set; }
         public string Line { get; set; }
@@ -32,6 +33,9 @@ namespace PluginForRevit2022.Core
         /// <summary>Прибор (id): от него считается трасса при Order=route; в него записываются данные для журнала.</summary>
         public long? ControllerElementId { get; set; }
         public bool DryRun { get; set; } = true;
+        // Только один модальный сценарий «предпросмотр → подтверждение» с тем же объектом запроса.
+        internal bool ReusePreviewOrder { get; set; }
+        internal (Document document, string settings, List<ElementId> input, List<ElementId> ordered, List<string> warnings)? PreviewOrder { get; set; }
     }
 
     /// <summary>Заполняет параметры устройств так, как их читает кабельный журнал.</summary>
@@ -44,7 +48,8 @@ namespace PluginForRevit2022.Core
         internal const string ParamAddress = "ARBM_ПСБ_Адрес устройства";
         internal const string ParamMark = "ARBM_SP_ElementMark";
         internal const string ParamProductName = "ARBM_ПС_Имя изделия";
-        internal const string ParamGrouping = "ADSK_Группирование";
+        internal const string ParamGrouping = "Группирование";
+
         internal const int LineCapacity = 250;
 
         /// <summary>«Комментарии» элемента без пробелов по краям.</summary>
@@ -64,7 +69,8 @@ namespace PluginForRevit2022.Core
             }
             Require(request.Controller, "controller (номер прибора)");
             Require(request.Line, "line (номер линии)");
-            if (system != "security") Require(request.Building, "building (ARBM_Корпус)");
+            request.FunctionalZones = system == "souye" && MarkingSettings.CurrentJournal().SouyeFunctionalZones;
+            if (system == "aps") Require(request.Building, "building (ARBM_Корпус)");
             RequireNumber(request.Controller, "controller");
             RequireNumber(request.Line, "line");
             if (system == "aps" && !ApsElementParser.IsValidBuildingCode(request.Building.Trim()))
@@ -72,6 +78,29 @@ namespace PluginForRevit2022.Core
                 throw new ArgumentException($"Корпус «{request.Building.Trim()}»: используйте латинские буквы, цифры и при необходимости уточнение в скобках (например M2 или UO(OW)).");
             }
             FamilyInstance controller = ResolveController(doc, request.ControllerElementId);
+            if (system == "souye")
+            {
+                if (!SouyeLineIdentity.Number(request.Controller, out int rack) ||
+                    !SouyeLineIdentity.Number(request.Line, out int line) || line > SouyeLineIdentity.MaxLine)
+                    throw new ArgumentException($"СОУЭ: укажите положительный номер прибора в стойке и номер линии от 1 до {SouyeLineIdentity.MaxLine}.");
+                request.Controller = rack.ToString();
+                request.Line = line.ToString();
+                if (controller == null || !SouyeLineIdentity.IsRack(controller))
+                    throw new ArgumentException("СОУЭ: выберите стойку в категории «Электрооборудование».");
+                if (string.IsNullOrWhiteSpace(request.Comments))
+                    request.Comments = CommentOf(controller).Length == 0 ? "СОУЭ" : CommentOf(controller);
+                request.FunctionalZones = request.FunctionalZones || HasLinkedSouyeLine(doc, controller, rack, line);
+                request.Building = SouyeLineIdentity.NormalizeBuilding(request.Building) ?? "";
+                if (!request.FunctionalZones) Require(request.Building, "building (ARBM_Корпус)");
+                ValidateSouyeRack(doc, controller, request, rack);
+            }
+            else if (controller != null &&
+                int.TryParse(RevitText.FindParameter(controller, ParamMark)?.AsString(), out int controllerNumber) &&
+                controllerNumber != int.Parse(request.Controller))
+            {
+                throw new ArgumentException($"Выбран прибор №{controllerNumber}, в запросе указан №{request.Controller.Trim()}. Укажите один номер прибора до маркировки.");
+            }
+            Func<FamilyInstance, bool> sameSouyeLine = system == "souye" ? SouyeLineMembership(doc, controller, request) : null;
             // Комментарий линии задаётся при маркировке (любой, например «АПС»). Для АПС обязателен: по нему линия
             // и журнал отбирают устройства; без него номера прибора и линии не образуют линию
             if (system == "aps" && string.IsNullOrWhiteSpace(request.Comments))
@@ -107,6 +136,27 @@ namespace PluginForRevit2022.Core
                         throw new InvalidOperationException($"Ни у одного выбранного устройства нет «Комментарии» = «{comment}». Заполните его у устройств линии и повторите.");
                 }
             }
+            if (system == "souye")
+            {
+                if (devices.Any(device => !SouyeLineIdentity.IsDevice(device)))
+                    throw new ArgumentException("Оповещатели СОУЭ должны быть в категории «Устройства вызова и оповещения».");
+                if (string.Equals(request.Order, "route", StringComparison.OrdinalIgnoreCase))
+                {
+                    int rack = int.Parse(request.Controller);
+                    int line = int.Parse(request.Line);
+                    var foreign = devices.Where(device =>
+                        (!string.IsNullOrWhiteSpace(ReadGrouping(device)) &&
+                         !SouyeLineIdentity.MatchesLine(device, rack, line)) ||
+                        ((request.FunctionalZones ? SouyeLineIdentity.TryLineNumbers(device, out _, out _) :
+                            SouyeLineIdentity.TryKey(device, out _)) && !sameSouyeLine(device))).ToList();
+                    if (foreign.Count > 0)
+                    {
+                        devices = devices.Except(foreign).ToList();
+                        warnings.Add($"Исключены устройства другой линии по маркировке или «{ParamGrouping}»: {foreign.Count}.");
+                        if (devices.Count == 0) throw new InvalidOperationException("В рамке нет устройств указанной линии СОУЭ.");
+                    }
+                }
+            }
             // БЦО задаётся в «Настройках маркировки». Чему не задано — маркировка не начинается (MCP может передать bco явно)
             List<string> noBco = devices.Select(d => d.Symbol.FamilyName).Distinct()
                 .Where(f => string.IsNullOrWhiteSpace(settings.BcoOf(f)) && string.IsNullOrWhiteSpace(request.Bco)).ToList();
@@ -120,15 +170,15 @@ namespace PluginForRevit2022.Core
             if (order != "route" && order != "snake" && order != "manual") throw new ArgumentException("order: manual, route или snake.");
 
             string floorParam = MarkingSettings.CurrentFloorParameter();
+            if (system == "souye") ValidateSouyeNumbers(doc, request, devices, sameSouyeLine);
             var changes = new List<Dictionary<string, object>>();
             var failures = new List<string>();
             var result = new Dictionary<string, object>();
+            // Обход читает модель. В транзакции остаются только запись параметров и её пробный откат.
+            devices = ResolveOrder(doc, request, devices, order, floorParam, warnings);
             using (var transaction = new Transaction(doc, "AerBIM: маркировка устройств"))
             {
                 transaction.Start();
-                // Этаж трасс заполняется вручную; порядок считается по уже заполненному.
-                if (order == "route") devices = OrderByRoute(doc, devices, request, warnings);
-                else if (order == "snake") devices = OrderBySnake(devices, RevitText.ToFeet(request.RowMm));
 
                 int number = request.StartNumber;
                 foreach (FamilyInstance device in devices)
@@ -143,7 +193,7 @@ namespace PluginForRevit2022.Core
                     var values = ValuesFor(system, request, number.ToString(), bco);
                     if (floor == null)
                     {
-                        failures.Add($"id {RevitIds.IdOf(device.Id)}: в имени уровня нет номера этажа — задайте его в окне маркировки: «Этажи уровней без номера…»");
+                        failures.Add($"id {RevitIds.IdOf(device.Id)}: не удалось определить номер этажа. Проверьте «Уровень» и «Уровень спецификации». Для уровня без номера задайте этаж в окне «Этажи уровней без номера…».");
                     }
                     else
                     {
@@ -156,6 +206,8 @@ namespace PluginForRevit2022.Core
                         if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, {pair.Key}: {error}");
                     }
                     ClearForeign(device, system, failures);
+                    if (SouyeLineIdentity.IsDevice(device))
+                        SouyeLineIdentity.LinkRack(device, request.FunctionalZones ? controller.UniqueId : null);
                     // Пустое значение не затирает существующие «Комментарии» устройств.
                     if (!string.IsNullOrWhiteSpace(request.Comments))
                     {
@@ -195,7 +247,7 @@ namespace PluginForRevit2022.Core
                 }
             }
 
-            int others = OtherDevicesOnLine(doc, system, request, devices);
+            int others = OtherDevicesOnLine(doc, system, request, devices, sameSouyeLine);
             if (others > 0)
             {
                 warnings.Add($"на этой линии уже размечено устройств вне выбора: {others} — номера могут повториться");
@@ -271,23 +323,21 @@ namespace PluginForRevit2022.Core
 
             string building = r.Building?.Trim();
             // Номер и код прибора — из его собственной маркировки (ARBM_SP_ElementMark, ARBM_ПСБ_БЦО), иначе из окна.
-            string ownMark = controller.LookupParameter(ParamMark)?.AsString()?.Trim();
-            string number = int.TryParse(ownMark, out int ownNumber) ? ownNumber.ToString() : r.Controller.Trim();
-            if (number != r.Controller.Trim())
-            {
-                warnings.Add($"у выбранного прибора номер {number} (ARBM_SP_ElementMark), а в окне указан прибор {r.Controller.Trim()}: " +
-                    "устройства получат номер из окна, и журнал не свяжет их с этим прибором");
-            }
-            string ownCode = controller.LookupParameter(ParamBco)?.AsString()?.Trim();
+            string ownMark = RevitText.FindParameter(controller, ParamMark)?.AsString()?.Trim();
+            string number = system != "souye" && int.TryParse(ownMark, out int ownNumber) ? ownNumber.ToString() : r.Controller.Trim();
+            if (system == "souye" && string.IsNullOrWhiteSpace(SouyeLineIdentity.Read(controller, ParamController)))
+                Put(ParamController, RevitText.FindParameter(controller, ParamController), number);
+
+            string ownCode = RevitText.FindParameter(controller, ParamBco)?.AsString()?.Trim();
             string code = string.IsNullOrEmpty(ownCode) ? "ARK" : ownCode;
             if (system == "aps" && code.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) < 0)
             {
                 warnings.Add($"БЦО прибора «{code}» без «ARK»: журнал АПС такой прибор не примет");
             }
 
-            if (!string.IsNullOrEmpty(building))
+            if (!r.FunctionalZones && !string.IsNullOrEmpty(building))
             {
-                Parameter buildingParameter = controller.LookupParameter(ParamBuilding);
+                Parameter buildingParameter = RevitText.FindParameter(controller, ParamBuilding);
                 string ownBuilding = buildingParameter?.AsString()?.Trim();
                 if (string.IsNullOrEmpty(ownBuilding))
                 {
@@ -298,35 +348,26 @@ namespace PluginForRevit2022.Core
                     warnings.Add($"у прибора корпус «{ownBuilding}», а в окне «{building}»: корпус прибора не изменён");
                 }
             }
-            string currentFloor = controller.LookupParameter(floorParam)?.AsString()?.Trim();
+            string currentFloor = RevitText.FindParameter(controller, floorParam)?.AsString()?.Trim();
             // Как у устройств: цифра из имени уровня, для уровня без номера — этаж из окна (r.Floor).
             string floor = int.TryParse(currentFloor, out int parsed) ? parsed.ToString() : FloorOf(doc, controller, r.Floor);
             if (floor == null)
             {
-                failures.Add($"прибор id {id}: у уровня прибора нет номера этажа в имени — задайте его в «Этажи уровней без номера…» или заполните «{floorParam}» прибора");
+                failures.Add($"прибор id {id}: не удалось определить номер этажа. Проверьте уровень прибора или заполните «{floorParam}». Для уровня без номера задайте этаж в окне «Этажи уровней без номера…».");
             }
             else
             {
-                Put(floorParam, controller.LookupParameter(floorParam), floor);
+                Put(floorParam, RevitText.FindParameter(controller, floorParam), floor);
             }
 
             if (!string.IsNullOrWhiteSpace(r.Comments))
             {
                 string comments = r.Comments.Trim();
                 Put("Комментарии", controller.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS), comments);
-                if (system == "souye")
-                {
-                    int others = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_ElectricalEquipment)
-                        .WhereElementIsNotElementType()
-                        .Count(e => e.Id != controller.Id && string.Equals(e.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString()?.Trim(), comments));
-                    if (others > 0)
-                    {
-                        warnings.Add($"ещё приборов с «Комментарии» = «{comments}»: {others}; журнал СОУЭ требует ровно один");
-                    }
-                }
+
             }
 
-            Parameter nameParameter = controller.LookupParameter(ParamProductName);
+            Parameter nameParameter = RevitText.FindParameter(controller, ParamProductName);
             string name = nameParameter?.AsString()?.Trim() ?? "";
             string[] parts = name.Split('.');
             switch (system)
@@ -349,7 +390,7 @@ namespace PluginForRevit2022.Core
                 string newName = changes.Where(c => (string)c["parameter"] == ParamProductName).Select(c => (string)c["new"]).FirstOrDefault() ?? name;
                 int same = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                     .WhereElementIsNotElementType()
-                    .Count(e => e.Id != controller.Id && string.Equals(e.LookupParameter(ParamProductName)?.AsString()?.Trim(), newName, StringComparison.OrdinalIgnoreCase));
+                    .Count(e => e.Id != controller.Id && string.Equals(RevitText.FindParameter(e, ParamProductName)?.AsString()?.Trim(), newName, StringComparison.OrdinalIgnoreCase));
                 if (same > 0)
                 {
                     warnings.Add($"имя прибора «{newName}» уже есть у других приборов ({same}); журнал требует уникальные имена");
@@ -359,34 +400,115 @@ namespace PluginForRevit2022.Core
         }
 
         /// <summary>Устройства проекта, уже записанные на эту линию и не входящие в текущую маркировку.</summary>
-        private static int OtherDevicesOnLine(Document doc, string system, MarkDevicesRequest r, List<FamilyInstance> selected)
+        private static int OtherDevicesOnLine(Document doc, string system, MarkDevicesRequest r, List<FamilyInstance> selected, Func<FamilyInstance, bool> sameSouyeLine)
         {
             var ids = new HashSet<long>(selected.Select(d => RevitIds.IdOf(d.Id)));
-            var categories = new List<BuiltInCategory> { BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices, BuiltInCategory.OST_NurseCallDevices };
-            string Value(Element e, string name) => e.LookupParameter(name)?.AsString()?.Trim();
-            string address = AddressFor(system, r);
+            string Value(Element e, string name) => RevitText.FindParameter(e, name)?.AsString()?.Trim();
+            string address = AddressFor(r);
+            return DeviceLineOperations.AllDevices(doc).Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) &&
+                (system == "souye" ? sameSouyeLine(e)
+                    : system == "aps"
+                        ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim() && HasComment(e, r.Comments)
+                        : Value(e, ParamAddress) == address));
+        }
 
-            return new FilteredElementCollector(doc).WherePasses(new ElementMulticategoryFilter(categories))
-                .WhereElementIsNotElementType().OfType<FamilyInstance>()
-                .Count(e => !ids.Contains(RevitIds.IdOf(e.Id)) && (system == "aps"
-                    ? Value(e, ParamBuilding) == r.Building?.Trim() && Value(e, ParamController) == r.Controller.Trim() && Value(e, ParamLine) == r.Line.Trim() && HasComment(e, r.Comments)
-                    : Value(e, ParamAddress) == address && (system != "souye" || Value(e, ParamBuilding) == r.Building?.Trim())));
+        private static List<FamilyInstance> ResolveOrder(Document doc, MarkDevicesRequest request, List<FamilyInstance> devices,
+            string order, string floorParameter, List<string> warnings)
+        {
+            var preview = request.PreviewOrder;
+            request.PreviewOrder = null;
+            if (order == "manual") return devices;
+
+            var input = devices.Select(device => device.Id).ToList();
+            string settings = string.Join("\n", order, request.System, request.ControllerElementId?.ToString(), request.Building,
+                request.Controller, request.Line, request.Comments, request.Floor, floorParameter,
+                request.FunctionalZones.ToString(), request.RowMm.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            if (request.ReusePreviewOrder && !request.DryRun && preview.HasValue &&
+                preview.Value.document.Equals(doc) && preview.Value.settings == settings && preview.Value.input.SequenceEqual(input))
+            {
+                var byId = devices.ToDictionary(device => device.Id);
+                warnings.AddRange(preview.Value.warnings);
+                return preview.Value.ordered.Select(id => byId[id]).ToList();
+            }
+
+            var orderWarnings = new List<string>();
+            var ordered = order == "route"
+                ? OrderByRoute(doc, devices, request, orderWarnings)
+                : OrderBySnake(devices, RevitText.ToFeet(request.RowMm));
+            warnings.AddRange(orderWarnings);
+            if (request.ReusePreviewOrder && request.DryRun)
+                request.PreviewOrder = (doc, settings, input, ordered.Select(device => device.Id).ToList(), orderWarnings);
+            return ordered;
+        }
+
+        private static Func<FamilyInstance, bool> SouyeLineMembership(Document doc, FamilyInstance controller, MarkDevicesRequest request)
+        {
+            int rack = int.Parse(request.Controller), line = int.Parse(request.Line);
+            bool unique = request.FunctionalZones && !SouyeLineIdentity.Racks(doc, request.Comments)
+                .Any(other => other.Id != controller.Id && SouyeLineIdentity.RackContains(other, rack));
+            return device =>
+            {
+                if (device.SuperComponent != null || !SouyeLineIdentity.TryLineNumbers(device, out int ownRack, out int ownLine) ||
+                    ownRack != rack || ownLine != line || !HasComment(device, request.Comments)) return false;
+                string link = SouyeLineIdentity.LinkedRack(device);
+                if (!string.IsNullOrEmpty(link)) return link == controller.UniqueId;
+                return request.FunctionalZones ? unique :
+                    SouyeLineIdentity.SameBuilding(SouyeLineIdentity.Read(device, ParamBuilding), request.Building);
+            };
+        }
+
+        private static void ValidateSouyeNumbers(Document doc, MarkDevicesRequest request, List<FamilyInstance> devices,
+            Func<FamilyInstance, bool> sameLine)
+        {
+            var selected = new HashSet<ElementId>(devices.Select(device => device.Id));
+            long end = (long)request.StartNumber + devices.Count - 1;
+            if (request.StartNumber < 1 || end > int.MaxValue)
+                throw new ArgumentException("Начальный номер и нумерация устройств СОУЭ должны быть положительными целыми числами.");
+            FamilyInstance conflict = DeviceLineOperations.AllDevices(doc)
+                .FirstOrDefault(device => !selected.Contains(device.Id) && sameLine(device) &&
+                    SouyeLineIdentity.Number(SouyeLineIdentity.Read(device, ParamMark), out int position) &&
+                    position >= request.StartNumber && position <= end);
+            if (conflict != null)
+                throw new InvalidOperationException($"Номер устройства id {RevitIds.IdOf(conflict.Id)} уже занят на этой линии СОУЭ. Выберите все устройства линии или задайте свободный начальный номер.");
+        }
+
+        internal static bool HasLinkedSouyeLine(Document doc, FamilyInstance controller, int rack, int line)
+        {
+            if (controller == null) return false;
+            return DeviceLineOperations.AllDevices(doc).Any(device =>
+                SouyeLineIdentity.TryLineNumbers(device, out int deviceRack, out int deviceLine) &&
+                deviceRack == rack && deviceLine == line && SouyeLineIdentity.LinkedRack(device) == controller.UniqueId);
+        }
+
+        private static void ValidateSouyeRack(Document doc, FamilyInstance controller, MarkDevicesRequest request, int rack)
+        {
+            string existingRack = SouyeLineIdentity.Read(controller, ParamController);
+            if (!SouyeLineIdentity.TryDeviceNumbers(existingRack, out var numbers) || (numbers.Count > 0 && !numbers.Contains(rack)))
+                throw new InvalidOperationException($"У стойки id {RevitIds.IdOf(controller.Id)} указаны номера приборов «{existingRack}». Выберите один из этих приборов.");
+            if (!string.IsNullOrWhiteSpace(CommentOf(controller)) && !HasComment(controller, request.Comments))
+                throw new InvalidOperationException($"У выбранной стойки другие «Комментарии» — «{CommentOf(controller)}». Выберите стойку той же группы.");
+            if (request.FunctionalZones) return;
+
+            string existingBuilding = SouyeLineIdentity.Read(controller, ParamBuilding);
+            if (!string.IsNullOrWhiteSpace(existingBuilding) && !SouyeLineIdentity.SameBuilding(existingBuilding, request.Building))
+                throw new InvalidOperationException($"У стойки id {RevitIds.IdOf(controller.Id)} указан корпус «{existingBuilding}». Укажите тот же корпус для линии.");
+            if (SouyeLineIdentity.Racks(doc, request.Comments).Any(other => other.Id != controller.Id && SouyeLineIdentity.MatchesRack(other, request.Building, rack)))
+                throw new InvalidOperationException($"В корпусе «{request.Building}» прибор с номером {rack} уже указан в другой стойке.");
         }
 
         /// <summary>
         /// Параметры другой системы, оставшиеся от прошлой маркировки, очищаются: иначе устройство, перемаркированное
         /// из АПС в СОТС, по «ARBM_Номер прибора»/«ARBM_Номер линии» осталось бы и в линии и журнале АПС.
-        /// АПС не использует адрес; СОУЭ — номер прибора и линии; СОТС — ещё и корпус.
+        /// АПС и СОУЭ используют отдельные номера прибора и линии, СОТС использует адрес.
         /// Очищается только заполненный и доступный для записи параметр.
         /// </summary>
         internal static void ClearForeign(Element device, string system, List<string> failures)
         {
-            string[] foreign = system == "aps" ? new[] { ParamAddress }
-                : system == "souye" ? new[] { ParamController, ParamLine }
+            string[] foreign = system == "aps" || system == "souye" ? new[] { ParamAddress }
                 : new[] { ParamController, ParamLine, ParamBuilding };
             foreach (string name in foreign)
             {
-                Parameter parameter = device.LookupParameter(name);
+                Parameter parameter = RevitText.FindParameter(device, name);
                 if (parameter == null || parameter.IsReadOnly || string.IsNullOrEmpty(parameter.AsString())) continue;
                 string error = RevitText.TrySet(parameter, name, "");
                 if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}, {name}: {error}");
@@ -395,32 +517,31 @@ namespace PluginForRevit2022.Core
 
         private static Dictionary<string, string> ValuesFor(string system, MarkDevicesRequest r, string mark, string bco)
         {
-            string address = AddressFor(system, r);
+            string address = AddressFor(r);
             switch (system)
             {
                 case "aps":
-                    return new Dictionary<string, string>
+                case "souye":
+                    var values = new Dictionary<string, string>
                     {
-                        [ParamBuilding] = r.Building.Trim(), [ParamController] = r.Controller.Trim(), [ParamBco] = bco,
+                        [ParamController] = r.Controller.Trim(), [ParamBco] = bco,
                         [ParamLine] = r.Line.Trim(), [ParamMark] = mark,
                     };
-                case "souye":
-                    return new Dictionary<string, string>
-                    {
-                        [ParamBuilding] = r.Building.Trim(), [ParamBco] = bco, [ParamAddress] = address, [ParamMark] = mark,
-                    };
+                    if (!r.FunctionalZones || !string.IsNullOrWhiteSpace(r.Building))
+                        values[ParamBuilding] = r.Building.Trim();
+                    return values;
                 default:
                     return new Dictionary<string, string> { [ParamBco] = bco, [ParamAddress] = address, [ParamMark] = mark };
             }
         }
 
         /// <summary>
-        /// Этаж числом из имени уровня («Этаж 03» → 3). Для уровня без номера в имени («Тех. Пространство»)
+        /// Этаж числом из имени уровня («Этаж 03» → 3), в том числе уровня из свойств экземпляра. Для уровня без номера
         /// берётся floorForUnnumbered; без него — null.
         /// </summary>
         internal static string FloorOf(Document doc, FamilyInstance device, string floorForUnnumbered)
         {
-            string level = (doc.GetElement(device.LevelId) as Level)?.Name;
+            string level = InstanceLevel(doc, device)?.Name;
             Match match = level == null ? Match.Empty : Regex.Match(level, @"-?\d+");
             if (match.Success) return int.Parse(match.Value).ToString();
             // Уровень без номера: этаж, переданный явно (MCP floor), иначе из «Этажи уровней без номера» (окно маркировки)
@@ -428,9 +549,21 @@ namespace PluginForRevit2022.Core
             return level == null ? null : MarkingSettings.LevelFloor(doc, level);
         }
 
-        /// <summary>ARBM_ПСБ_Адрес устройства: СОТС — «прибор.шлейф», СОУЭ — номер шлейфа целым числом.</summary>
-        internal static string AddressFor(string system, MarkDevicesRequest r) =>
-            system == "souye" ? r.Line.Trim() : $"{r.Controller.Trim()}.{r.Line.Trim()}";
+        internal static Level InstanceLevel(Document doc, FamilyInstance device)
+        {
+            Level LevelFrom(Parameter parameter) => parameter?.StorageType == StorageType.ElementId
+                ? doc.GetElement(parameter.AsElementId()) as Level
+                : null;
+
+            // У семейств на основе LevelId может быть пустым, хотя уровень задан в свойствах.
+            return doc.GetElement(device.LevelId) as Level
+                ?? LevelFrom(device.get_Parameter(BuiltInParameter.FAMILY_LEVEL_PARAM))
+                ?? LevelFrom(RevitText.FindParameter(device, "Уровень"))
+                ?? LevelFrom(device.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM));
+        }
+
+        /// <summary>Адрес устройств СОТС.</summary>
+        private static string AddressFor(MarkDevicesRequest r) => $"{r.Controller.Trim()}.{r.Line.Trim()}";
 
         /// <summary>Ряды по оси Y сверху вниз, внутри ряда по X попеременно в разные стороны.</summary>
         private static List<FamilyInstance> OrderBySnake(List<FamilyInstance> devices, double rowStep)
@@ -461,13 +594,16 @@ namespace PluginForRevit2022.Core
             var controller = doc.GetElement(RevitIds.ToElementId(request.ControllerElementId.Value)) as FamilyInstance
                 ?? throw new ArgumentException($"Прибор id {request.ControllerElementId} не найден.");
 
+            if (string.Equals(request.System?.Trim(), "souye", StringComparison.OrdinalIgnoreCase))
+                return OrderSouyeByRoute(doc, controller, devices, request);
+
             // 1. По ходу кабеля: кабель линии собирается из отрезков и обходится от прибора.
             string comment = request.Comments?.Trim();
             bool commented = !string.IsNullOrEmpty(comment);
             Func<Element, bool> lineCable = e => IsLineRoute(e, request.Controller, request.Line) && (!commented || HasComment(e, comment));
             List<FamilyInstance> lineCables = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_MechanicalEquipment)
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
-                .Where(c => c.Symbol.FamilyName != "ARBM_Межэтажный переход" && c.Location is LocationCurve)
+                .Where(c => c.Location is LocationCurve && !CableWalk.IsTransition(c))
                 .ToList();
             List<FamilyInstance> ofLine = lineCables.Where(c => lineCable(c)).ToList();
             bool byGrouping = ofLine.Count > 0;
@@ -480,7 +616,7 @@ namespace PluginForRevit2022.Core
             // и порядок по кабелю разошёлся бы с журналом — обход не запускается, порядок по графу журнала.
             // По «Комментариям» берутся трассы всей системы — чужая трасса без этажа не должна отключать обход
             string floorParameter = MarkingSettings.CurrentFloorParameter();
-            List<FamilyInstance> noFloor = !byGrouping ? new List<FamilyInstance>() : ofLine.Where(c => !int.TryParse(c.LookupParameter(floorParameter)?.AsString()?.Trim(), out _)).ToList();
+            List<FamilyInstance> noFloor = !byGrouping ? new List<FamilyInstance>() : ofLine.Where(c => !int.TryParse(RevitText.FindParameter(c, floorParameter)?.AsString()?.Trim(), out _)).ToList();
             if (noFloor.Count > 0)
             {
                 warnings.Add($"у трасс линии не заполнен «{floorParameter}» цифрой: {noFloor.Count} из {ofLine.Count} " +
@@ -490,7 +626,7 @@ namespace PluginForRevit2022.Core
             if (ofLine.Count > 0 && noFloor.Count == 0)
             {
                 List<FamilyInstance> walked = CableWalk.Order(doc, ofLine, controller, devices, out List<FamilyInstance> notReached, out string problem, commented ? comment : null);
-                if (walked != null && walked.Count >= devices.Count * 0.9)
+                if (walked != null && problem == null && walked.Count >= devices.Count * 0.9)
                 {
                     if (notReached.Count > 0)
                     {
@@ -508,7 +644,7 @@ namespace PluginForRevit2022.Core
                     }
                     return walked;
                 }
-                warnings.Add(walked == null
+                warnings.Add(problem != null || walked == null
                     ? $"по ходу кабеля пронумеровать нельзя ({problem}): порядок по минимуму кабеля"
                     : $"кабель от прибора собирается не целиком (найдено устройств {walked.Count} из {devices.Count}) — разрывы в стыках трасс; порядок по минимуму кабеля");
             }
@@ -532,7 +668,7 @@ namespace PluginForRevit2022.Core
                 if (lineRoutes > 0)
                 {
                     source = $"«{ParamGrouping}» = …АЛС.{request.Controller.Trim()}.{request.Line.Trim()}";
-                    calculator.BuildGraphsByLevel(doc, new List<ControllerWithLoops> { group }, "", byLine);
+                    calculator.BuildGraphsByLevel(doc, new List<ControllerWithLoops> { group }, comment, byLine);
                 }
                 else if (!string.IsNullOrWhiteSpace(request.Comments))
                 {
@@ -547,7 +683,8 @@ namespace PluginForRevit2022.Core
                         "(прибор.линия). Заполните его у трасс линии или укажите «Комментарии» трасс.");
                 }
 
-                ordered = TraceRoute(doc, calculator, controller, devices, warnings);
+                if (calculator.BuildError != null) throw new InvalidOperationException(calculator.BuildError);
+                ordered = TraceRoute(calculator, controller, devices, warnings);
                 if (ordered.Count == 0)
                 {
                     throw new InvalidOperationException(
@@ -559,10 +696,44 @@ namespace PluginForRevit2022.Core
             return ordered;
         }
 
-        /// <summary>Трасса линии: ADSK_Группирование вида «СПС_АЛС.прибор.линия» — две последние части после точки.</summary>
+        private static List<FamilyInstance> OrderSouyeByRoute(Document doc, FamilyInstance controller,
+            List<FamilyInstance> devices, MarkDevicesRequest request)
+        {
+            var matches = SouyeLineIdentity.MarkingRouteFilter(doc, request.Building, int.Parse(request.Controller), int.Parse(request.Line), request.Comments, request.FunctionalZones);
+            var routes = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_MechanicalEquipment)
+                .WhereElementIsNotElementType().OfType<FamilyInstance>()
+                .Where(cable => cable.Location is LocationCurve && matches(cable)).ToList();
+            if (routes.Count == 0)
+                throw new SouyeRouteLayoutException($"Не найдены трассы СОУЭ для корпуса «{request.Building}», стойки {request.Controller}, линии {request.Line}. Проверьте «{ParamGrouping}», корпус и «Комментарии».");
+
+            string floor = MarkingSettings.CurrentFloorParameter();
+            var missing = routes.Where(cable => !int.TryParse(SouyeLineIdentity.Read(cable, floor), out _))
+                .Select(cable => RevitIds.IdOf(cable.Id)).ToList();
+            if (missing.Count > 0)
+                throw new SouyeRouteLayoutException($"У {missing.Count} трасс линии не указан числовой «{floor}». ID: {string.Join(", ", missing.Take(10))}.");
+
+            var order = CableWalk.Order(doc, routes, controller, devices, out var missed, out string problem,
+                request.Comments);
+            if (problem != null)
+                throw new SouyeRouteLayoutException($"СОУЭ, стойка {request.Controller}, линия {request.Line}: {problem}. Проверьте трассу от стойки.");
+            if (missed.Count > 0)
+                throw new SouyeRouteLayoutException($"Не удалось обойти {missed.Count} из {devices.Count} устройств линии СОУЭ. ID: " +
+                    string.Join(", ", missed.Take(12).Select(device => RevitIds.IdOf(device.Id))) +
+                    ". Проверьте состав выделения и стыки трасс либо укажите ручной порядок.");
+            return order;
+        }
+
+        internal static string ReadGrouping(Element element)
+        {
+            Parameter parameter = RevitText.FindParameter(element, "ADSK_Группирование");
+            return parameter?.StorageType == StorageType.String ? parameter.AsString()?.Trim() : null;
+        }
+
+        /// <summary>Трасса линии: группирование вида «СПС_АЛС.прибор.линия» — две последние части после точки.</summary>
         internal static bool IsLineRoute(Element element, string controller, string line)
         {
-            string value = element.LookupParameter(ParamGrouping)?.AsString();
+            if (CableWalk.IsTransition(element)) return false;
+            string value = ReadGrouping(element);
             if (string.IsNullOrWhiteSpace(value)) return false;
             string[] parts = value.Split('.');
             if (parts.Length < 3) return false;
@@ -580,7 +751,7 @@ namespace PluginForRevit2022.Core
         /// Разрывы вида «13 → 14 в обход 30» удлиняют цепочку и поэтому убираются; на петле номера идут по кругу.
         /// Устройства, до которых от прибора нет пути по трассам, добавляются в конец по близости с предупреждением.
         /// </summary>
-        private static List<FamilyInstance> TraceRoute(Document doc, RouteLengthCalculator calculator, FamilyInstance controller,
+        private static List<FamilyInstance> TraceRoute(RouteLengthCalculator calculator, FamilyInstance controller,
             List<FamilyInstance> devices, List<string> warnings)
         {
             var neighbours = new Dictionary<RouteLengthCalculator.Graph.Node, List<KeyValuePair<RouteLengthCalculator.Graph.Node, double>>>();
@@ -597,25 +768,6 @@ namespace PluginForRevit2022.Core
                 foreach (RouteLengthCalculator.Graph.Edge edge in graph.Edges) Link(edge.A, edge.B, edge.Length);
             }
 
-            // Межэтажные переходы: узлы перехода на разных этажах в одной точке плана соединяются.
-            // Учитывается переход на трассе линии (не дальше 1 м), иначе это переход другой линии.
-            double nearRoute = 1000 / 304.8, samePlace = 300 / 304.8;
-            var transitions = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
-                .Where(f => f.Symbol.FamilyName == "ARBM_Межэтажный переход")
-                .Select(f => calculator._deviceNodes.TryGetValue(f.Id.ToString(), out var node) ? node : null)
-                .Where(n => n != null && n.Edges.Count > 0 && n.Edges.Min(e => e.Length) <= nearRoute)
-                .ToList();
-            for (int i = 0; i < transitions.Count; i++)
-            {
-                for (int j = i + 1; j < transitions.Count; j++)
-                {
-                    XYZ a = transitions[i].Point, b = transitions[j].Point;
-                    if (Math.Abs(a.Z - b.Z) > 1e-3 && Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)) <= samePlace)
-                    {
-                        Link(transitions[i], transitions[j], Math.Abs(a.Z - b.Z));
-                    }
-                }
-            }
 
             if (!calculator._deviceNodes.TryGetValue(controller.Id.ToString(), out RouteLengthCalculator.Graph.Node start))
             {
@@ -731,7 +883,7 @@ namespace PluginForRevit2022.Core
                 for (int k = 0; k < r.Count; k++) sum += dist[k == 0 ? 0 : r[k - 1], r[k]];
                 return sum;
             }
-            var marks = reachable.Select(i => int.TryParse(pointDevices[i].LookupParameter(ParamMark)?.AsString()?.Trim(), out int m) ? m : (int?)null).ToList();
+            var marks = reachable.Select(i => int.TryParse(RevitText.FindParameter(pointDevices[i], ParamMark)?.AsString()?.Trim(), out int m) ? m : (int?)null).ToList();
             if (reachable.Count > 1 && marks.All(m => m.HasValue) && marks.Distinct().Count() == marks.Count)
             {
                 List<int> current = reachable.Zip(marks, (i, m) => (i, m: m.Value)).OrderBy(x => x.m).Select(x => x.i).ToList();

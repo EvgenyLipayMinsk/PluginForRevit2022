@@ -26,9 +26,12 @@ namespace PluginForRevit2022.UI
 
         internal AddSharedParametersWindow(Document doc, RevitApplication app)
         {
-            InitializeComponent();
             _doc = doc;
             _app = app;
+            InitializeComponent();
+            AerBimAppearance.Apply(this);
+            AerBimAppearance.Primary(this, ApplyButton);
+            FilePathBox.TextChanged += (sender, args) => OnSelectionChanged();
 
             Title = $"Добавить параметры из ФОП — {doc.Title}";
             bool isFamily = doc.IsFamilyDocument;
@@ -92,7 +95,7 @@ namespace PluginForRevit2022.UI
                 FilePathBox.Text = path;
                 foreach (SharedParameterDef p in definitions)
                 {
-                    string tooltip = $"GUID: {p.Guid}\nТип данных: {p.DataType}" +
+                    string tooltip = $"{p.Name}\nGUID: {p.Guid}\nТип данных: {p.DataType}" +
                                      (string.IsNullOrWhiteSpace(p.Description) ? "" : "\n" + p.Description);
                     _parameters.Add(new CheckItem(p.Name, p.Guid.ToString(), p.Group,
                         string.IsNullOrEmpty(p.DataType) ? null : $"  ({p.DataType})", OnSelectionChanged) { Tooltip = tooltip });
@@ -102,6 +105,7 @@ namespace PluginForRevit2022.UI
             catch (Exception ex)
             {
                 ResultBox.Text = "Не удалось прочитать ФОП: " + ex.Message;
+                ResultPanel.IsExpanded = true;
             }
             CollectionViewSource.GetDefaultView(_parameters).Refresh();
             OnSelectionChanged();
@@ -144,9 +148,13 @@ namespace PluginForRevit2022.UI
         {
             int parameters = _parameters.Count(p => p.IsChecked);
             ParameterCountText.Text = $"выбрано {parameters} из {_parameters.Count}";
-            SelectionText.Text = _doc.IsFamilyDocument
-                ? $"Параметров: {parameters}"
-                : $"Параметров: {parameters}, категорий: {_categories.Count(c => c.IsChecked)}";
+            int categories = _categories.Count(c => c.IsChecked);
+            bool pathLoaded = _loadedPath != null &&
+                string.Equals(FilePathBox.Text.Trim(), _loadedPath, StringComparison.OrdinalIgnoreCase);
+            bool ready = pathLoaded && parameters > 0 && (_doc.IsFamilyDocument || categories > 0);
+            PreviewButton.IsEnabled = ApplyButton.IsEnabled = ready;
+            SelectionText.Text = _loadedPath != null && !pathLoaded ? "Загрузите изменённый путь к ФОП."
+                : _doc.IsFamilyDocument ? $"Параметров: {parameters}" : $"Параметров: {parameters}, категорий: {categories}";
         }
 
         // ---------- Выполнение ----------
@@ -187,6 +195,7 @@ namespace PluginForRevit2022.UI
 
         private void Run(bool dryRun)
         {
+            ResultPanel.IsExpanded = true;
             try
             {
                 AddSharedParametersResult result = SharedParameterOperations.Add(_doc, _app, BuildRequest(dryRun));

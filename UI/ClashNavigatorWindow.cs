@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Concurrent;
+
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Autodesk.Revit.UI;
 using Microsoft.Win32;
 using PluginForRevit2022.Core;
@@ -22,30 +23,109 @@ namespace PluginForRevit2022.UI
     /// <summary>Действия с моделью из немодального окна — только через ExternalEvent (в контексте Revit API).</summary>
     internal sealed class RevitActionQueue : IExternalEventHandler
     {
-        private readonly ConcurrentQueue<Action<UIApplication>> _queue = new ConcurrentQueue<Action<UIApplication>>();
-        private readonly ExternalEvent _event;
-
-        public RevitActionQueue() { _event = ExternalEvent.Create(this); }
-
-        public void Run(Action<UIApplication> action)
+        private sealed class Request
         {
-            _queue.Enqueue(action);
-            _event.Raise();
+            public Action<UIApplication> Action;
+            public Action<string> OnError;
+            public string Key;
         }
 
-        /// <summary>Окно закрыто: невыполненные действия отбрасываются, событие освобождается.</summary>
+        private readonly LinkedList<Request> _queue = new LinkedList<Request>();
+        private readonly ExternalEvent _event;
+        private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
+        private readonly DispatcherTimer _retry;
+        private bool _scheduled, _executing, _closed;
+        private int _failedRequests;
+
+        public RevitActionQueue()
+        {
+            _event = ExternalEvent.Create(this);
+            _retry = new DispatcherTimer(DispatcherPriority.ContextIdle, _dispatcher) { Interval = TimeSpan.FromMilliseconds(200) };
+            _retry.Tick += (sender, args) =>
+            {
+                _retry.Stop();
+                Schedule();
+            };
+        }
+
+        public void Run(Action<UIApplication> action, Action<string> onError = null, string key = null)
+        {
+            if (_closed) return;
+            Request current = key == null ? null : _queue.FirstOrDefault(request => request.Key == key);
+            if (current == null) _queue.AddLast(new Request { Action = action, OnError = onError, Key = key });
+            else
+            {
+                current.Action = action;
+                current.OnError = onError;
+            }
+            Schedule();
+        }
+
+        private void Schedule()
+        {
+            if (_scheduled || _executing || _closed || _retry.IsEnabled || _queue.Count == 0) return;
+            _scheduled = true;
+            _dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+            {
+                if (_closed) return;
+                ExternalEventRequest state;
+                try { state = _event.Raise(); }
+                catch (Exception ex)
+                {
+                    FailPending("Не удалось поставить действие в очередь Revit. " + ex.Message);
+                    return;
+                }
+
+                if (state == ExternalEventRequest.Accepted || state == ExternalEventRequest.Pending)
+                {
+                    _failedRequests = 0;
+                    return;
+                }
+
+                _scheduled = false;
+                if (++_failedRequests < 6) _retry.Start();
+                else FailPending("Revit не принял действие. Повторите после завершения текущей команды.");
+            }));
+        }
+
+        private void FailPending(string message)
+        {
+            _scheduled = false;
+            _failedRequests = 0;
+            Request[] pending = _queue.ToArray();
+            _queue.Clear();
+            PluginLog.Warn("clash.queue", message);
+            foreach (Request request in pending) request.OnError?.Invoke(message);
+        }
+
+        /// <summary>Окно закрыто: невыполненные действия отбрасываются, событие освобождается после текущего вызова.</summary>
         public void Close()
         {
-            while (_queue.TryDequeue(out _)) { }
-            _event.Dispose();
+            if (_closed) return;
+            _closed = true;
+            _retry.Stop();
+            _queue.Clear();
+            if (!_executing) _event.Dispose();
         }
 
         public void Execute(UIApplication app)
         {
-            while (_queue.TryDequeue(out Action<UIApplication> action))
+            _scheduled = false;
+            if (_closed || _queue.First == null) return;
+            Request request = _queue.First.Value;
+            _queue.RemoveFirst();
+            _executing = true;
+            try { request.Action(app); }
+            catch (Exception ex)
             {
-                try { action(app); }
-                catch (Exception ex) { PluginLog.Warn("clash", ex.ToString()); }
+                PluginLog.Warn("clash.queue", ex.ToString());
+                request.OnError?.Invoke(ex.Message);
+            }
+            finally
+            {
+                _executing = false;
+                if (_closed) _event.Dispose();
+                else Schedule();
             }
         }
 
@@ -62,6 +142,7 @@ namespace PluginForRevit2022.UI
 
         private readonly RevitActionQueue _revit;
         private ClashReport _report = new ClashReport();
+        private ClashRevit.CoordinateSession _coordinates = new ClashRevit.CoordinateSession();
         private List<ClashItem> _view = new List<ClashItem>();
 
         private readonly TextBlock _files = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -70,9 +151,15 @@ namespace PluginForRevit2022.UI
         private readonly ListBox _list = new ListBox { Margin = new Thickness(0, 0, 8, 0) };
         private readonly TextBlock _title = new TextBlock { FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         private readonly TextBlock _details = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6) };
-        private readonly Image _image = new Image { MaxHeight = 220, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 6) };
+        private readonly Image _image = new Image { MaxHeight = 150, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4) };
+        private readonly Expander _imagePreview = new Expander { Margin = new Thickness(0, 6, 0, 0) };
         private readonly Button _pasteScreenshot;
         private readonly Button _removeScreenshot;
+        private readonly Button _showInModel, _previous, _next, _export, _openExcel;
+        private readonly DockPanel _exportFeedback = new DockPanel { Visibility = Visibility.Collapsed };
+        private readonly TextBlock _exportStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        private bool _exporting;
+        private string _exportPath;
         private readonly TextBlock _imageHint = new TextBlock { Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap };
         private readonly TextBox _comment = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 56, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         private readonly TextBlock _commentHint = new TextBlock { Foreground = Brushes.DimGray, Margin = new Thickness(0, 6, 0, 2) };
@@ -87,13 +174,14 @@ namespace PluginForRevit2022.UI
         private readonly Dictionary<ClashStatus, Button> _statusButtons = new Dictionary<ClashStatus, Button>();
         private bool _loading;
         private bool _noAutoShow;
-        private ClashItem _pendingShow; // выбор строки программно (обновление списка) — модель не перестраиваем
+        private const string ClashViewRequest = "clash-view";
+        private long _showSequence;
 
         private static readonly Dictionary<ClashStatus, Color> StatusColor = new Dictionary<ClashStatus, Color>
         {
             [ClashStatus.New] = Color.FromRgb(136, 135, 128),
             [ClashStatus.InWork] = Color.FromRgb(186, 117, 23),
-            [ClashStatus.Passed] = Color.FromRgb(24, 95, 165),
+            [ClashStatus.Passed] = AerBimAppearance.AccentColor,
             [ClashStatus.Fake] = Color.FromRgb(83, 74, 183),
             [ClashStatus.Fixed] = Color.FromRgb(59, 109, 17),
         };
@@ -155,7 +243,7 @@ namespace PluginForRevit2022.UI
         }
 
         /// <summary>Коллизия относится к активной модели: один из её элементов из этого файла.</summary>
-        private bool InModel(ClashItem i) => ClashRevit.IsModel(i.Item1.File, _modelNames) || ClashRevit.IsModel(i.Item2.File, _modelNames);
+        private bool InModel(ClashItem item) => ClashReportFileOperations.InModel(item, _modelNames);
 
         /// <summary>Фильтр по модели работает, только если в отчёте есть файлы элементов (в точках обзора их нет).</summary>
         private bool ModelFilterOn => _onlyModel.IsChecked == true && _modelNames.Count > 0
@@ -171,7 +259,10 @@ namespace PluginForRevit2022.UI
             MinHeight = 480;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ShowInTaskbar = false;
-            FontSize = 13;
+            AerBimAppearance.Apply(this);
+            System.Windows.Automation.AutomationProperties.SetName(_filter, "Статус коллизий");
+            System.Windows.Automation.AutomationProperties.SetName(_list, "Коллизии отчёта");
+            System.Windows.Automation.AutomationProperties.SetName(_comment, "Комментарий к коллизии");
 
             var root = new DockPanel { Margin = new Thickness(12) };
 
@@ -203,23 +294,36 @@ namespace PluginForRevit2022.UI
 
             // Низ: навигация и выгрузка
             var bottom = new DockPanel { Margin = new Thickness(0, 10, 0, 0), LastChildFill = true };
-            var export = Btn("Выгрузить в Excel…", (s, e) => Export());
-            DockPanel.SetDock(export, Dock.Right);
-            bottom.Children.Add(export);
+            _export = Btn("Выгрузить в Excel…", (s, e) => Export());
+            _export.IsEnabled = false;
+            DockPanel.SetDock(_export, Dock.Right);
+            bottom.Children.Add(_export);
             // Кнопки и флажок переходят на следующую строку, когда окно узкое, — ничего не перекрывается
             var nav = new WrapPanel();
-            nav.Children.Add(Btn("◀ Предыдущая", (s, e) => Step(-1)));
-            nav.Children.Add(Btn("Показать в модели", (s, e) => ShowSelected()));
-            nav.Children.Add(Btn("Следующая ▶", (s, e) => Step(1)));
+            _previous = Btn("Предыдущая", (s, e) => Step(-1));
+            _showInModel = Btn("Показать в модели", (s, e) => ShowSelected());
+            _next = Btn("Следующая", (s, e) => Step(1));
+            AerBimAppearance.Primary(this, _showInModel);
+            nav.Children.Add(_previous);
+            nav.Children.Add(_next);
+            nav.Children.Add(_showInModel);
             nav.Children.Add(_autoShow);
             bottom.Children.Add(nav);
-            root.Children.Add(bottom);
-            DockPanel.SetDock(bottom, Dock.Bottom);
+            _openExcel = Btn("Открыть Excel", (s, e) => OpenExport());
+            _openExcel.Visibility = Visibility.Collapsed;
+            DockPanel.SetDock(_openExcel, Dock.Right);
+            _exportFeedback.Children.Add(_openExcel);
+            _exportFeedback.Children.Add(_exportStatus);
+            var footer = new StackPanel();
+            footer.Children.Add(bottom);
+            footer.Children.Add(_exportFeedback);
+            root.Children.Add(footer);
+            DockPanel.SetDock(footer, Dock.Bottom);
 
             // Центр: список и карточка коллизии
             var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star), MinWidth = 220 });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 320 });
             _list.SelectionChanged += (s, e) => ShowCard(true);
             Grid.SetColumn(_list, 0);
             grid.Children.Add(_list);
@@ -227,16 +331,7 @@ namespace PluginForRevit2022.UI
             var card = new StackPanel();
             card.Children.Add(_title);
             card.Children.Add(_details);
-            card.Children.Add(_image);
-            card.Children.Add(_imageHint);
-            var screenshots = new WrapPanel();
-            _pasteScreenshot = Btn("Вставить скрин из буфера", (s, e) => PasteScreenshot());
-            _pasteScreenshot.ToolTip = "Скопируйте изображение (например, Win+Shift+S) и вставьте его в выбранную коллизию. Ctrl+V вне поля комментария — вставить скрин.";
-            _removeScreenshot = Btn("Убрать скрин", (s, e) => ChangeScreenshot(null));
-            _removeScreenshot.ToolTip = "Убрать добавленный скриншот и показать исходную картинку Navisworks, если она есть.";
-            screenshots.Children.Add(_pasteScreenshot);
-            screenshots.Children.Add(_removeScreenshot);
-            card.Children.Add(screenshots);
+
             var statuses = new WrapPanel();
             foreach (ClashStatus s in ClashStatusText.All)
             {
@@ -251,6 +346,22 @@ namespace PluginForRevit2022.UI
             card.Children.Add(_commentHint);
             card.Children.Add(_comment);
             card.Children.Add(_state);
+
+            var screenshots = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            _pasteScreenshot = Btn("Вставить скрин из буфера", (s, e) => PasteScreenshot());
+            _pasteScreenshot.ToolTip = "Скопируйте изображение (например, Win+Shift+S) и вставьте его в выбранную коллизию. Ctrl+V вне поля комментария — вставить скрин.";
+            _removeScreenshot = Btn("Убрать скрин", (s, e) => ChangeScreenshot(null));
+            _removeScreenshot.ToolTip = "Убрать добавленный скриншот и показать исходную картинку Navisworks, если она есть.";
+            screenshots.Children.Add(_pasteScreenshot);
+            screenshots.Children.Add(_removeScreenshot);
+            card.Children.Add(screenshots);
+
+            var preview = new StackPanel();
+            preview.Children.Add(_image);
+            preview.Children.Add(_imageHint);
+            _imagePreview.Content = preview;
+            _imagePreview.Visibility = Visibility.Collapsed;
+            card.Children.Add(_imagePreview);
             _comment.LostFocus += (s, e) => SaveComment();
             var scroll = new ScrollViewer { Content = card, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             Grid.SetColumn(scroll, 1);
@@ -280,6 +391,7 @@ namespace PluginForRevit2022.UI
                 e.Handled = true;
                 return;
             }
+            if (!_list.IsKeyboardFocusWithin || Keyboard.Modifiers != ModifierKeys.None) return;
             if (e.Key == Key.Down || e.Key == Key.Right || e.Key == Key.PageDown) { Step(1); e.Handled = true; }
             else if (e.Key == Key.Up || e.Key == Key.Left || e.Key == Key.PageUp) { Step(-1); e.Handled = true; }
         }
@@ -301,6 +413,9 @@ namespace PluginForRevit2022.UI
                 ClashReport report = NavisReportReader.Read(dialog.FileNames);
                 ClashStatusStore.Load(report);
                 _report = report;
+                SetExportStatus("");
+                _imagePreview.IsExpanded = false;
+                _coordinates = new ClashRevit.CoordinateSession();
                 _files.Text = string.Join("; ", report.Files.Select(Path.GetFileName));
                 PluginLog.Info("clash.open", $"{report.Files.Count} файл(ов), коллизий {report.Items.Count}");
                 Refresh(null);
@@ -327,22 +442,30 @@ namespace PluginForRevit2022.UI
             if (_view.Count > 0) _list.SelectedIndex = Math.Min(index, _view.Count - 1);
             else ShowCard(false);
             _noAutoShow = false;
-            _counts.Text = _report.Items.Count == 0 ? "Откройте отчёт Navisworks (HTML или XML)."
-                : string.Join("   ", ClashStatusText.All.Select(s => $"{ClashStatusText.Of(s)}: {scope.Count(i => i.Status == s)}"))
-                  + (byModel ? $"   В этой модели: {scope.Count} из {_report.Items.Count}" : $"   Всего: {_report.Items.Count}");
+            _counts.Text = _report.Items.Count == 0 ? "" : $"Показано: {_view.Count} из {scope.Count}";
+            _export.IsEnabled = !_exporting && scope.Count > 0;
         }
 
         private ListBoxItem Row(ClashItem i)
         {
-            var dot = new System.Windows.Shapes.Ellipse { Width = 10, Height = 10, Fill = new SolidColorBrush(StatusColor[i.Status]), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            string status = ClashStatusText.Of(i.Status);
+            var dot = new System.Windows.Shapes.Ellipse
+            {
+                Width = 8, Height = 8,
+                Fill = SystemParameters.HighContrast ? SystemColors.WindowTextBrush : new SolidColorBrush(StatusColor[i.Status]),
+                Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center,
+            };
             var text = new StackPanel();
-            text.Children.Add(new TextBlock { Text = i.Name, FontWeight = FontWeights.SemiBold });
-            string sub = string.Join(" · ", new[] { i.Test, i.Group }.Where(x => !string.IsNullOrEmpty(x)));
-            if (sub.Length > 0) text.Children.Add(new TextBlock { Text = sub, Foreground = Brushes.DimGray, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });
-            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            text.Children.Add(new TextBlock { Text = i.Name, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+            string details = string.Join(" · ", new[] { status, i.Test, i.Group }.Where(value => !string.IsNullOrEmpty(value)));
+            text.Children.Add(new TextBlock { Text = details, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis });
+            var panel = new DockPanel { ToolTip = details };
+            DockPanel.SetDock(dot, Dock.Left);
             panel.Children.Add(dot);
             panel.Children.Add(text);
-            return new ListBoxItem { Content = panel, Tag = i, Padding = new Thickness(4, 3, 4, 3) };
+            var row = new ListBoxItem { Content = panel, Tag = i, Padding = new Thickness(4, 3, 4, 3), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            System.Windows.Automation.AutomationProperties.SetName(row, $"{i.Name}. {status}");
+            return row;
         }
 
         // ===================== Карточка =====================
@@ -352,6 +475,9 @@ namespace PluginForRevit2022.UI
             if (_loading) return;
             ClashItem i = Selected;
             bool has = i != null;
+            _showInModel.IsEnabled = has;
+            _previous.IsEnabled = has && _list.SelectedIndex > 0;
+            _next.IsEnabled = has && _list.SelectedIndex < _view.Count - 1;
             foreach (Button b in _statusButtons.Values) b.IsEnabled = has;
             _comment.IsEnabled = has;
             _pasteScreenshot.IsEnabled = has;
@@ -361,6 +487,7 @@ namespace PluginForRevit2022.UI
                 _title.Text = _report.Items.Count == 0 ? "Отчёт не открыт" : (ModelFilterOn ? "В активной модели нет коллизий с таким статусом" : "Нет коллизий с таким статусом");
                 _details.Text = _report.Items.Count == 0 ? "Нажмите «Открыть отчёт…» и выберите HTML или XML, выгруженный из Navisworks (Clash Detective или точки обзора)." : "";
                 _image.Source = null;
+                _imagePreview.Visibility = Visibility.Collapsed;
                 _imageHint.Text = "";
                 _comment.Text = "";
                 _commentHint.Text = "";
@@ -391,8 +518,9 @@ namespace PluginForRevit2022.UI
             foreach (var pair in _statusButtons)
             {
                 bool on = pair.Key == i.Status;
-                pair.Value.Background = on ? new SolidColorBrush(StatusColor[pair.Key]) : SystemColors.ControlBrush;
-                pair.Value.Foreground = on ? Brushes.White : SystemColors.ControlTextBrush;
+                pair.Value.Content = (on ? "✓ " : "") + ClashStatusText.Of(pair.Key);
+                pair.Value.BorderBrush = on && !SystemParameters.HighContrast
+                    ? new SolidColorBrush(StatusColor[pair.Key]) : SystemColors.ControlDarkBrush;
                 pair.Value.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
             }
             _commentHint.Text = i.Status == ClashStatus.Fake ? "Комментарий: почему коллизия фиктивная (по желанию)" : "Комментарий (по желанию)";
@@ -401,12 +529,14 @@ namespace PluginForRevit2022.UI
 
         private void UpdateScreenshotUi(ClashItem item)
         {
-            _image.Source = LoadImage(item.EffectiveImagePath);
+            bool hasImagePath = !string.IsNullOrEmpty(item.EffectiveImagePath);
+            _image.Source = hasImagePath ? LoadImage(item.EffectiveImagePath) : null;
+            _imagePreview.Visibility = hasImagePath ? Visibility.Visible : Visibility.Collapsed;
+            _imagePreview.Header = _image.Source == null ? "Изображение недоступно" : "Предпросмотр скриншота";
             bool custom = !string.IsNullOrEmpty(item.ScreenshotPath);
             _removeScreenshot.IsEnabled = custom;
-            _imageHint.Text = string.IsNullOrEmpty(item.EffectiveImagePath) ? "Скриншот не добавлен" :
-                (_image.Source == null ? "Изображение не найдено или не читается. Вставьте новый скриншот." :
-                    (custom ? "Скриншот пользователя — войдёт в Excel" : "Картинка из отчёта Navisworks — войдёт в Excel"));
+            _imageHint.Text = _image.Source == null ? "Изображение не найдено или не читается. Вставьте новый скриншот." :
+                (custom ? "Скриншот пользователя — войдёт в Excel" : "Картинка из отчёта Navisworks — войдёт в Excel");
         }
 
         private void PasteScreenshot()
@@ -524,23 +654,32 @@ namespace PluginForRevit2022.UI
             ClashItem i = Selected;
             if (i == null) return;
             _state.Text = "Показываю в модели…";
-            _pendingShow = i;
+            long sequence = ++_showSequence;
+            ClashReport report = _report;
+            ClashRevit.CoordinateSession coordinates = _coordinates;
+            bool Current() => IsLoaded && Selected == i && _showSequence == sequence && _report == report;
+            void ShowError(string message)
+            {
+                if (Current()) _state.Text = "Не удалось показать коллизию. " + message;
+            }
+
             _revit.Run(app =>
             {
-                if (_pendingShow != i) return; // пока ждали Revit, выбрали другую коллизию
-                string result;
-                Autodesk.Revit.DB.XYZ min = null, max = null;
-                try { result = ClashRevit.Show(app, i, out min, out max); }
-                catch (Exception ex) { result = "Не удалось показать: " + ex.Message; }
-                Dispatcher.BeginInvoke(new Action(() => { if (Selected == i) _state.Text = result; }));
-                // Только что открытый вид появляется среди открытых после возврата в Revit — масштаб отдельным шагом
-                if (min != null) _revit.Run(a => ClashRevit.Zoom(a, min, max));
-            });
+                if (!Current()) return;
+                string result = ClashRevit.Show(app, i, report.Items, coordinates, out ClashRevit.ViewFocus focus);
+                if (!Current()) return;
+                _state.Text = result;
+                if (focus == null) return;
+                _revit.Run(next =>
+                {
+                    if (Current()) focus.Apply(next);
+                }, ShowError, ClashViewRequest);
+            }, ShowError, ClashViewRequest);
         }
 
         private void Export()
         {
-            if (_report.Items.Count == 0) return;
+            if (_exporting || _report.Items.Count == 0) return;
             SaveComment();
             // Как в списке: при флажке «Только модель …» — только коллизии активной модели
             bool byModel = ModelFilterOn;
@@ -561,30 +700,62 @@ namespace PluginForRevit2022.UI
             if (dialog.ShowDialog(this) != true) return;
             // Сначала Revit дописывает журнал замены ID (столбцы «новый ID»), потом выгрузка
             string target = dialog.FileName;
-            _state.Text = "Выгружаю…";
+            string modelTitle = byModel ? _modelTitle : "";
+            ClashReport report = _report;
+            _exporting = true;
+            _export.IsEnabled = false;
+            SetExportStatus("Выгружаю в Excel…");
             _revit.Run(app =>
             {
                 ElementIdJournal.FlushAll();
-                Dispatcher.BeginInvoke(new Action(() => { _state.Text = ""; WriteExcel(items, target, byModel); }));
-            });
+                Dispatcher.BeginInvoke(new Action(() => WriteExcel(items, target, modelTitle, report)));
+            }, message => FinishExport(report, "Не удалось выгрузить отчёт. " + message));
         }
 
-        private void WriteExcel(List<ClashItem> items, string path, bool byModel)
+        private void WriteExcel(List<ClashItem> items, string path, string modelTitle, ClashReport report)
         {
-            var dialog = new { FileName = path };
             try
             {
-                ClashExcel.Write(items, dialog.FileName);
-                PluginLog.Info("clash.export", dialog.FileName + (byModel ? " | модель " + _modelTitle : ""));
-                string scope = byModel ? $"Модель «{_modelTitle}».\n" : "";
-                if (MessageBox.Show(this, $"{scope}Выгружено: {items.Count(x => x.Status != ClashStatus.Fixed)} коллизий, исправленных — {items.Count(x => x.Status == ClashStatus.Fixed)} (лист «Исправлено»).\nОткрыть файл?",
-                        Title, MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
-                    Process.Start(new ProcessStartInfo(dialog.FileName) { UseShellExecute = true });
+                ClashExcel.Write(items, path);
+                string scope = string.IsNullOrEmpty(modelTitle) ? "" : $"Модель «{modelTitle}». ";
+                PluginLog.Info("clash.export", path + (scope.Length == 0 ? "" : " | модель " + modelTitle));
+                int fixedCount = items.Count(item => item.Status == ClashStatus.Fixed);
+                FinishExport(report, $"{scope}Excel сохранён. Коллизий: {items.Count - fixedCount}, исправлено: {fixedCount}.", path);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Не удалось выгрузить: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+                FinishExport(report, "Не удалось выгрузить отчёт. " + ex.Message);
             }
+        }
+
+        private void FinishExport(ClashReport report, string message, string path = null)
+        {
+            _exporting = false;
+            if (!IsLoaded) return;
+            _export.IsEnabled = ModelFilterOn ? _report.Items.Any(InModel) : _report.Items.Count > 0;
+            if (_report == report) SetExportStatus(message, path);
+        }
+
+        private void SetExportStatus(string message, string path = null)
+        {
+            _exportPath = path;
+            _exportStatus.Text = message;
+            _exportFeedback.Visibility = message.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            _openExcel.Visibility = path == null ? Visibility.Collapsed : Visibility.Visible;
+            _openExcel.ToolTip = path;
+        }
+
+        private void OpenExport()
+        {
+            string path = _exportPath;
+            if (path == null) return;
+            if (!File.Exists(path))
+            {
+                SetExportStatus("Файл выгрузки не найден. Сформируйте отчёт заново.");
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+            catch (Exception ex) { SetExportStatus("Не удалось открыть Excel. " + ex.Message, path); }
         }
     }
 }

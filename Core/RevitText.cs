@@ -14,6 +14,14 @@ namespace PluginForRevit2022.Core
 
         public static double ToFeet(double mm) => mm / MmPerFoot;
 
+        public static Parameter FindParameter(Element element, string name)
+        {
+            if (element == null || string.IsNullOrWhiteSpace(name)) return null;
+            if (PluginParameterCheck.TryGetSharedGuid(name, out Guid guid) || Guid.TryParse(name, out guid))
+                return element.get_Parameter(guid);
+            return element.LookupParameter(name);
+        }
+
         public static string ValueText(Parameter parameter)
         {
             if (parameter == null || !parameter.HasValue)
@@ -24,8 +32,15 @@ namespace PluginForRevit2022.Core
             {
                 case StorageType.String:
                     return parameter.AsString();
-                default:
+                case StorageType.Integer:
                     return parameter.AsValueString() ?? parameter.AsInteger().ToString(CultureInfo.InvariantCulture);
+                case StorageType.Double:
+                    return parameter.AsValueString() ?? parameter.AsDouble().ToString("G17", CultureInfo.InvariantCulture);
+                case StorageType.ElementId:
+                    ElementId id = parameter.AsElementId();
+                    return parameter.AsValueString() ?? (id == null ? null : RevitIds.IdOf(id).ToString(CultureInfo.InvariantCulture));
+                default:
+                    return null;
             }
         }
 
@@ -34,7 +49,7 @@ namespace PluginForRevit2022.Core
         /// Числа с единицами («5000», «5 м») передаются Revit через SetValueString.
         /// </summary>
         public static string TrySet(Element element, string parameterName, string value) =>
-            TrySet(element.LookupParameter(parameterName), parameterName, value);
+            TrySet(FindParameter(element, parameterName), parameterName, value);
 
         public static string TrySet(Parameter parameter, string parameterName, string value)
         {

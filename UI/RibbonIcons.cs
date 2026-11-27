@@ -13,7 +13,7 @@ namespace PluginForRevit2022.UI
     /// </summary>
     internal static class RibbonIcons
     {
-        public static readonly Color Accent = Color.FromRgb(24, 95, 165);   // синий: основные действия
+        public static readonly Color Accent = AerBimAppearance.AccentColor;
         public static readonly Color On = Color.FromRgb(59, 109, 17);       // зелёный: MCP включён
         public static readonly Color Off = Color.FromRgb(136, 135, 128);    // серый: MCP выключен
 

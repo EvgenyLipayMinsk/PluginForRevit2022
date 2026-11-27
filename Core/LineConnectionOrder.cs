@@ -61,7 +61,7 @@ namespace PluginForRevit2022.Core
         }
 
         internal static int Address(FamilyInstance device) =>
-            int.TryParse(device.LookupParameter(DeviceMarkingOperations.ParamMark)?.AsString(), out int address) ? address : 0;
+            int.TryParse(RevitText.FindParameter(device, DeviceMarkingOperations.ParamMark)?.AsString(), out int address) ? address : 0;
 
         internal static List<FamilyInstance> Ordered(IEnumerable<FamilyInstance> devices, IReadOnlyList<string> order, bool checkAddresses = true)
         {
@@ -113,30 +113,110 @@ namespace PluginForRevit2022.Core
             return result;
         }
 
-        internal static List<FamilyInstance> Suggest(Document doc, FamilyInstance controller, List<FamilyInstance> devices,
-            string key, out string warning)
+        internal sealed class Suggestion
         {
-            if (controller == null)
+            public List<FamilyInstance> Devices = new List<FamilyInstance>();
+            public HashSet<string> Estimated = new HashSet<string>();
+            public HashSet<string> Review = new HashSet<string>();
+            public string Hint;
+        }
+
+        internal static Suggestion Suggest(Document doc, FamilyInstance controller, List<FamilyInstance> devices,
+            string key, List<FamilyInstance> retained, bool estimateFromPlan, bool useRouteGrouping)
+        {
+            var suggestion = new Suggestion();
+            if (devices.Count == 0)
             {
-                warning = "Прибор не определён однозначно. Укажите порядок вручную.";
-                return new List<FamilyInstance>();
+                suggestion.Hint = "В шлейфе нет устройств.";
+                return suggestion;
+            }
+
+            if (!(controller?.Location is LocationPoint))
+            {
+                suggestion.Devices = retained ?? new List<FamilyInstance>();
+                suggestion.Hint = "У прибора нет однозначной точки начала. Укажите недостающий порядок вручную.";
+                return suggestion;
             }
             string comment = DeviceMarkingOperations.CommentOf(devices[0]);
             var routes = new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_MechanicalEquipment)
                 .WhereElementIsNotElementType().OfType<FamilyInstance>()
-                .Where(c => c.Location is LocationCurve && c.Symbol.FamilyName != "ARBM_Межэтажный переход" &&
-                    IsRoute(c, key) && DeviceMarkingOperations.HasComment(c, comment)).ToList();
-            var order = CableWalk.Order(doc, routes, controller, devices, out var missed, out string problem, comment);
-            warning = problem != null ? "Обход трассы: " + problem + ". Укажите порядок вручную." :
-                missed.Count > 0 ? "Обход не нашёл адреса: " + string.Join(", ", missed.Select(Address)) + ". Добавьте их в нужные места." :
-                "Порядок предложен по трассе. Сверьте направление обхода и развилки.";
-            return order ?? new List<FamilyInstance>();
+                .Where(c => c.Location is LocationCurve && c.Symbol.FamilyName != CableWalk.TransitionFamily &&
+                    DeviceMarkingOperations.HasComment(c, comment) && (!useRouteGrouping || IsRoute(c, key))).ToList();
+            var walk = CableWalk.Order(doc, routes, controller, devices, out var missed, out string problem, comment);
+            if (!estimateFromPlan)
+            {
+                suggestion.Devices = walk ?? new List<FamilyInstance>();
+                suggestion.Hint = problem != null ? "Обход трассы: " + problem + ". Укажите порядок вручную." :
+                    missed.Count > 0 ? "Обход не нашёл адреса: " + string.Join(", ", missed.Select(Address)) + ". Добавьте их в нужные места." :
+                    "Порядок предложен по трассе. Сверьте направление обхода и развилки.";
+                return suggestion;
+            }
+            if (retained == null && walk != null && missed.Count == 0)
+            {
+                suggestion.Devices = walk;
+                suggestion.Hint = "Порядок предложен по трассе. Сверьте направление обхода и развилки.";
+                return suggestion;
+            }
+
+            suggestion.Devices = retained ?? walk ?? new List<FamilyInstance>();
+            var known = new HashSet<string>(suggestion.Devices.Select(device => device.UniqueId));
+            List<FamilyInstance> remaining = devices.Where(device => !known.Contains(device.UniqueId))
+                .OrderBy(Address).ThenBy(device => RevitIds.IdOf(device.Id)).ToList();
+            int retainedCount = suggestion.Devices.Count;
+            if (remaining.Count == 0)
+            {
+                suggestion.Hint = "Сохранён относительный порядок оставшихся устройств. Проверьте соединения.";
+                return suggestion;
+            }
+
+            string floorParameter = MarkingSettings.CurrentFloorParameter();
+            PlanConnectionOrder.Point PointOf(FamilyInstance device, int index)
+            {
+                if (!(device.Location is LocationPoint location)) return null;
+                XYZ point = location.Point;
+                return new PlanConnectionOrder.Point
+                {
+                    Index = index, Level = CableWalk.LevelOf(device, floorParameter),
+                    X = point.X, Y = point.Y, Z = point.Z,
+                };
+            }
+
+            var start = suggestion.Devices.Select(device => PointOf(device, -1)).LastOrDefault(point => point != null)
+                ?? PointOf(controller, -1);
+            var points = remaining.Select(PointOf).ToList();
+            PlanConnectionOrder.Point Shaft(CableWalk.ShaftPort port) => new PlanConnectionOrder.Point
+            {
+                Index = -1, Level = port.Level, X = port.Point.X, Y = port.Point.Y, Z = port.Point.Z,
+            };
+            var tunnelPlan = CableWalk.PlanTunnels(doc, Array.Empty<CableWalk.RouteSpan>(), comment);
+            var transitions = tunnelPlan.Shafts.Select(pair => (Shaft(pair.Lower), Shaft(pair.Upper)));
+            var estimated = PlanConnectionOrder.Build(start, points.Where(point => point != null), transitions, out var review);
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (points[i] != null) continue;
+                estimated.Add(i);
+                review.Add(i);
+            }
+
+            suggestion.Devices.AddRange(estimated.Select(i => remaining[i]));
+            suggestion.Estimated.UnionWith(remaining.Select(device => device.UniqueId));
+            suggestion.Review.UnionWith(review.Select(i => remaining[i].UniqueId));
+            if (retained != null)
+                suggestion.Hint = $"Сохранён относительный порядок {retainedCount} устройств. Новые адреса добавлены в конец по плану. Проверьте их место в шлейфе.";
+            else if (retainedCount > 0)
+                suggestion.Hint = $"По трассе найдено {retainedCount} из {devices.Count} устройств. Остальные добавлены в конец по плану. Проверьте их место в шлейфе.";
+            else
+                suggestion.Hint = (problem == null ? "" : "Обход трассы: " + problem + ". ") +
+                    "Подставлен черновик по расположению устройств на плане. Проверьте фактический порядок подключения.";
+            if (points.Any(point => point == null))
+                suggestion.Hint += " Устройства без точки на плане добавлены в конец по адресам.";
+            return suggestion;
         }
 
         internal static bool IsRoute(Element route, string key)
         {
             string[] parts = key.Split('|');
-            string building = route.LookupParameter(DeviceMarkingOperations.ParamBuilding)?.AsString()?.Trim();
+            string building = RevitText.FindParameter(route, DeviceMarkingOperations.ParamBuilding)?.AsString()?.Trim();
             return DeviceMarkingOperations.IsLineRoute(route, parts[2], parts[3]) &&
                 (string.IsNullOrEmpty(building) || string.Equals(building, parts[1], StringComparison.OrdinalIgnoreCase));
         }

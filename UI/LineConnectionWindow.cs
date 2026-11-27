@@ -20,12 +20,15 @@ namespace PluginForRevit2022
             public List<FamilyInstance> Devices;
             public List<FamilyInstance> Suggested;
             public string Hint;
-            public List<FamilyInstance> Walk;
+            public string AutomaticHint;
+            public LineConnectionOrder.Suggestion Automatic;
+            public bool UsesAutomatic;
             public List<string> Order;
         }
 
         internal LineConnectionWindow(IList<Line> lines, string accept, IntPtr owner, bool renumber = false, string title = "Порядок подключения АПС")
         {
+            UI.AerBimAppearance.Apply(this);
             Title = title;
             Width = 750;
             Height = 570;
@@ -39,6 +42,7 @@ namespace PluginForRevit2022
             DockPanel.SetDock(buttons, Dock.Bottom);
             var cancel = new Button { Content = "Отмена", IsCancel = true, Padding = new Thickness(12, 5, 12, 5) };
             var apply = new Button { Content = accept, IsDefault = true, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0) };
+            UI.AerBimAppearance.Primary(this, apply);
             apply.Click += (s, e) => DialogResult = true;
             buttons.Children.Add(cancel);
             buttons.Children.Add(apply);
@@ -51,17 +55,24 @@ namespace PluginForRevit2022
                 var page = new DockPanel { Margin = new Thickness(10) };
                 var header = new StackPanel();
                 DockPanel.SetDock(header, Dock.Top);
-                header.Children.Add(new TextBlock { Text = line.Hint, TextWrapping = TextWrapping.Wrap });
+                var hint = new TextBlock { Text = line.Hint, TextWrapping = TextWrapping.Wrap };
+                header.Children.Add(hint);
                 if (!renumber)
                     header.Children.Add(new TextBlock
                     {
-                        Text = "Для каждой пары КЖ рассчитает кратчайший путь по трассам шлейфа. На кольце и развилках проверьте физический ход кабеля.",
+                        Text = "Длины между устройствами считаются по доступным трассам с теми же «Комментариями». Проверьте порядок на кольце и развилках.",
                         TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0),
                     });
-                header.Children.Add(new TextBlock
+                var addresses = new TextBlock
                 {
-                    Text = "Устройства шлейфа (" + line.Devices.Count + ") · " + string.Join(", ", line.Devices.Select(LineConnectionOrder.Address).OrderBy(n => n)),
-                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6),
+                    Text = string.Join(", ", line.Devices.Select(LineConnectionOrder.Address).OrderBy(n => n)),
+                    TextWrapping = TextWrapping.Wrap,
+                };
+                header.Children.Add(new Expander
+                {
+                    Header = $"Устройства шлейфа ({line.Devices.Count})",
+                    Content = new ScrollViewer { Content = addresses, MaxHeight = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+                    Margin = new Thickness(0, 6, 0, 6),
                 });
                 bool useIds = renumber && (line.Devices.Any(d => LineConnectionOrder.Address(d) <= 0) ||
                     line.Devices.GroupBy(LineConnectionOrder.Address).Any(g => g.Count() > 1));
@@ -84,19 +95,42 @@ namespace PluginForRevit2022
                     MinHeight = 48, MaxHeight = 100, Margin = new Thickness(0, 4, 0, 4),
                 };
                 header.Children.Add(sequence);
-                var reset = new Button { Content = "Подставить обход трассы", HorizontalAlignment = HorizontalAlignment.Left, IsEnabled = line.Walk.Count > 0 };
-                reset.Click += (s, e) => sequence.Text = string.Join(", ", line.Walk.Select(Token));
+                bool showEstimated = line.UsesAutomatic;
+                var reset = new Button
+                {
+                    Content = line.Automatic.Estimated.Count > 0 ? "Подставить черновик по плану" : "Подставить предложенный порядок",
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    IsEnabled = line.Automatic.Devices.Count > 0,
+                };
                 header.Children.Add(reset);
-                var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
-                header.Children.Add(status);
+                var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                header.Children.Add(new ScrollViewer
+                {
+                    Content = status, MaxHeight = 70, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Margin = new Thickness(0, 4, 0, 8),
+                });
                 page.Children.Add(header);
+                var previewPanel = new DockPanel();
+                var previewTitle = new TextBlock
+                {
+                    Text = renumber ? "Предпросмотр новых адресов" : "Предпросмотр соединений",
+                    FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 4),
+                };
+                DockPanel.SetDock(previewTitle, Dock.Top);
+                previewPanel.Children.Add(previewTitle);
                 var preview = new ListBox();
-                page.Children.Add(preview);
+                previewPanel.Children.Add(preview);
+                page.Children.Add(previewPanel);
                 tabs.Items.Add(new TabItem { Header = line.Title, Content = page });
 
                 void Refresh()
                 {
                     var rows = new List<string>();
+                    string Mark(FamilyInstance device)
+                    {
+                        if (!showEstimated || !line.Automatic.Estimated.Contains(device.UniqueId)) return "";
+                        return line.Automatic.Review.Contains(device.UniqueId) ? "   ? Проверьте соединение" : "   ≈ По плану";
+                    }
                     try
                     {
                         line.Order = useIds ? LineConnectionOrder.ParseIds(sequence.Text, line.Devices) : LineConnectionOrder.Parse(sequence.Text, line.Devices);
@@ -104,7 +138,7 @@ namespace PluginForRevit2022
                         if (renumber)
                         {
                             rows.AddRange(ordered.Select((d, i) =>
-                                $"ID {RevitIds.IdOf(d.Id)}   {LineConnectionOrder.Address(d)} → {i + 1}"));
+                                $"ID {RevitIds.IdOf(d.Id)}   {LineConnectionOrder.Address(d)} → {i + 1}{Mark(d)}"));
                         }
                         else
                         {
@@ -112,10 +146,14 @@ namespace PluginForRevit2022
                             foreach (var device in ordered)
                             {
                                 string to = LineConnectionOrder.Address(device).ToString();
-                                rows.Add(from + " → " + to);
+                                rows.Add(from + " → " + to + Mark(device));
                                 from = to;
                             }
-                            if (line.Ring) rows.Add(from + " → " + line.Controller);
+                            if (line.Ring)
+                            {
+                                string verifyReturn = showEstimated && line.Automatic.Estimated.Count > 0 ? "   ? Проверьте возврат к прибору" : "";
+                                rows.Add(from + " → " + line.Controller + verifyReturn);
+                            }
                         }
                         status.Text = "Все устройства указаны по одному разу.";
                     }
@@ -124,9 +162,17 @@ namespace PluginForRevit2022
                         line.Order = null;
                         status.Text = ex.Message;
                     }
+                    previewPanel.Visibility = rows.Count == 0 ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
                     preview.ItemsSource = rows;
                     apply.IsEnabled = lines.All(l => l.Order != null);
                 }
+                reset.Click += (s, e) =>
+                {
+                    showEstimated = true;
+                    hint.Text = line.AutomaticHint;
+                    sequence.Text = string.Join(", ", line.Automatic.Devices.Select(Token));
+                    Refresh();
+                };
                 sequence.TextChanged += (s, e) => Refresh();
                 Refresh();
             }

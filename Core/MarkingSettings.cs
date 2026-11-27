@@ -97,6 +97,7 @@ namespace PluginForRevit2022.Core
         public double LineReserveM { get; set; }
         /// <summary>Имя параметра этажа для маркировки и кабельных журналов.</summary>
         public string FloorParameter { get; set; } = MarkingSettings.DefaultFloorParameter;
+        public bool SouyeFunctionalZones { get; set; }
 
         public void Validate()
         {
@@ -361,7 +362,7 @@ namespace PluginForRevit2022.Core
         public static JournalSettings CurrentJournal()
         {
             JournalSettings j = ReadAccount().Journal ?? new JournalSettings();
-            return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM, FloorParameter = j.FloorParameter };
+            return new JournalSettings { ApsPercent = j.ApsPercent, SecurityPercent = j.SecurityPercent, SouyePercent = j.SouyePercent, LineReserveM = j.LineReserveM, FloorParameter = j.FloorParameter, SouyeFunctionalZones = j.SouyeFunctionalZones };
         }
 
         internal const string DefaultFloorParameter = "ADSK_Этаж";

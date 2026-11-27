@@ -48,7 +48,8 @@ namespace PluginForRevit2022
     {
         private readonly Document _doc;
         private readonly UIDocument _uiDoc;
-        private readonly List<Button> _connectionButtons = new List<Button>();
+        private readonly List<MenuItem> _connectionCommands = new List<MenuItem>();
+        private readonly Button _connectionMenuButton;
         private readonly DataGrid _table = new DataGrid
         {
             AutoGenerateColumns = false,
@@ -71,6 +72,7 @@ namespace PluginForRevit2022
         {
             _uiDoc = uiDoc;
             _doc = uiDoc.Document;
+            UI.AerBimAppearance.Apply(this);
             Title = "Диспетчер линий";
             Width = 1110;
             Height = 560;
@@ -81,7 +83,7 @@ namespace PluginForRevit2022
             foreach (var (header, property, width) in new[]
             {
                 ("Система", "System", 70.0), ("Корпус", "Building", 70.0), ("Прибор", "Controller", 70.0), ("Линия", "Line", 60.0),
-                ("Комментарии", "Comment", 90.0), ("Тип маркировки", "MarkingType", 135.0), ("Устройств", "Occupied", 90.0), ("Номера", "Numbers", 80.0), ("Пропуски / повторы", "Problems", 170.0), ("Этажи", "Floors", 0.0),
+                ("Тип маркировки", "MarkingType", 135.0), ("Устройств", "Occupied", 90.0), ("Номера", "Numbers", 80.0), ("Пропуски / повторы", "Problems", 170.0), ("Этажи", "Floors", 0.0),
             })
             {
                 // Сортировка по клику на заголовок — числом
@@ -99,30 +101,52 @@ namespace PluginForRevit2022
             var trigger = new DataTrigger { Binding = new System.Windows.Data.Binding("HasIssues"), Value = true };
             trigger.Setters.Add(new Setter(BackgroundProperty, new SolidColorBrush(System.Windows.Media.Color.FromRgb(250, 238, 218))));
             issueStyle.Triggers.Add(trigger);
-            _table.RowStyle = issueStyle;
+            if (!SystemParameters.HighContrast) _table.RowStyle = issueStyle;
             _table.SelectionChanged += (s, e) => UpdateButtons();
             LineTableSort.Attach(_table);
-            _table.MouseDoubleClick += (s, e) => SelectInModel();
+            _table.MouseDoubleClick += (s, e) =>
+            {
+                if (e.OriginalSource is DependencyObject source && ItemsControl.ContainerFromElement(_table, source) is DataGridRow)
+                    SelectInModel();
+            };
 
             _select = Action("Выделить в модели", SelectInModel, "Закрыть окно и выделить устройства выбранных линий");
             _delete = Action("Удалить линию", DeleteLines, "Снять маркировку со всех устройств выбранных линий (с предпросмотром)");
-            var buttons = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-            buttons.Children.Add(Action("Обновить", Reload, "Перечитать линии из модели"));
-            buttons.Children.Add(_select);
+            UI.AerBimAppearance.Primary(this, _select);
+            var buttons = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+            DockPanel.SetDock(_delete, Dock.Left);
+            _delete.VerticalAlignment = VerticalAlignment.Top;
             buttons.Children.Add(_delete);
-            _connectionButtons.Add(Action("Порядок подключения…", () => EditConnection(false), "Проверить и сохранить порядок подключения выбранной линии АПС"));
-            _connectionButtons.Add(Action("Добавить без перенумерации…", AddFixed, "Добавить одно устройство по его фактическому адресу"));
-            _connectionButtons.Add(Action("Исключить без перенумерации…", RemoveFixed, "Исключить адреса из состава выбранной линии"));
-            _connectionButtons.Add(Action("Обновить маркировку по порядку…", () => EditConnection(true), "Показать новые адреса и подтвердить перенумерацию"));
-            _connectionButtons.Add(Action("Режим «По порядку»", SwitchToSequential, "Перевести линию в режим последовательной маркировки"));
-            foreach (var button in _connectionButtons) buttons.Children.Add(button);
+            var actions = new WrapPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            actions.Children.Add(Action("Обновить", Reload, "Перечитать линии из модели"));
+
+            var menu = new ContextMenu();
+            void AddConnectionCommand(string title, Action command, string hint)
+            {
+                var item = new MenuItem { Header = title, ToolTip = hint };
+                item.Click += (sender, args) => command();
+                _connectionCommands.Add(item);
+                menu.Items.Add(item);
+            }
+            AddConnectionCommand("Порядок подключения…", () => EditConnection(false), "Проверить и сохранить порядок подключения");
+            AddConnectionCommand("Добавить без перенумерации…", AddFixed, "Добавить устройство по фактическому адресу");
+            AddConnectionCommand("Исключить без перенумерации…", RemoveFixed, "Исключить адрес из выбранной линии");
+            AddConnectionCommand("Обновить маркировку по порядку…", () => EditConnection(true), "Проверить новые адреса и подтвердить перенумерацию");
+            AddConnectionCommand("Режим «По порядку»", SwitchToSequential, "Перевести шлейф в режим последовательной маркировки");
+            _connectionMenuButton = Action("Действия с АПС…", () => menu.IsOpen = true, "Операции с порядком подключения");
+            menu.PlacementTarget = _connectionMenuButton;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+            actions.Children.Add(_connectionMenuButton);
+
             Button close = Action("Закрыть", Close, null);
             close.IsCancel = true;
-            buttons.Children.Add(close);
+            actions.Children.Add(close);
+            actions.Children.Add(_select);
+            buttons.Children.Add(actions);
 
-            _comment.SelectionChanged += (s, e) => { if (!_reloading) Show(); };
+            _comment.SelectionChanged += (s, e) => { if (!_reloading) ShowLines(); };
             var top = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-            var label = new TextBlock { Text = "Комментарии:", VerticalAlignment = VerticalAlignment.Center };
+            var label = UI.AerBimAppearance.Label("Комментарии линий", _comment);
             DockPanel.SetDock(label, Dock.Left);
             DockPanel.SetDock(_comment, Dock.Left);
             top.Children.Add(label);
@@ -159,16 +183,17 @@ namespace PluginForRevit2022
             _comment.SelectedItem = current != null && comments.Contains(current) ? current : comments.FirstOrDefault();
             _comment.IsEnabled = comments.Count > 1;
             _reloading = false;
-            Show();
+            ShowLines();
         }
 
         /// <summary>Линии выбранного комментария.</summary>
-        private void Show()
+        private void ShowLines()
         {
             foreach (DataGridColumn c in _table.Columns) c.SortDirection = null; // новый список — в исходном порядке
             string comment = _comment.SelectedItem as string;
             List<LineInfo> lines = _lines.Where(l => CommentKey(l) == comment).ToList();
             _table.ItemsSource = lines;
+            if (lines.Count == 1) _table.SelectedItem = lines[0];
             if (_lines.Count == 0)
             {
                 _summary.Text = "В проекте нет размеченных линий.";
@@ -192,14 +217,12 @@ namespace PluginForRevit2022
             _delete.IsEnabled = any;
             var line = Selected.Count == 1 ? Selected[0] : null;
             bool aps = line?.System == "АПС" && !string.IsNullOrEmpty(line.Comment);
-            if (_connectionButtons.Count == 5)
-            {
-                _connectionButtons[0].IsEnabled = aps;
-                _connectionButtons[1].IsEnabled = aps && line.ByConnection;
-                _connectionButtons[2].IsEnabled = aps && line.ByConnection;
-                _connectionButtons[3].IsEnabled = aps && !line.ByConnection;
-                _connectionButtons[4].IsEnabled = aps && line.ByConnection;
-            }
+            _connectionMenuButton.Visibility = aps ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            _connectionCommands[0].IsEnabled = aps;
+            _connectionCommands[1].IsEnabled = aps && line.ByConnection;
+            _connectionCommands[2].IsEnabled = aps && line.ByConnection;
+            _connectionCommands[3].IsEnabled = aps && !line.ByConnection;
+            _connectionCommands[4].IsEnabled = aps && line.ByConnection;
             _delete.Content = _table.SelectedItems.Count > 1 ? $"Удалить линии ({_table.SelectedItems.Count})" : "Удалить линию";
         }
 
@@ -236,30 +259,43 @@ namespace PluginForRevit2022
         }
 
         internal static LineConnectionWindow.Line PrepareConnection(Document doc, string key, List<FamilyInstance> devices,
-            FamilyInstance controller, string controllerName, bool ring)
+            FamilyInstance controller, string controllerName, bool ring, bool estimateFromPlan = true, bool useRouteGrouping = false)
         {
-            var walk = LineConnectionOrder.Suggest(doc, controller, devices, key, out string hint);
-            var suggested = walk;
+            List<FamilyInstance> confirmed = null;
+            List<FamilyInstance> retained = null;
+            string changeHint = null;
             if (LineConnectionOrder.Read(doc).TryGetValue(key, out var saved))
             {
                 try
                 {
-                    suggested = LineConnectionOrder.Ordered(devices, saved.Order);
-                    hint = "Показан подтверждённый порядок подключения. Сверьте его с трассой.";
+                    confirmed = LineConnectionOrder.Ordered(devices, saved.Order);
                 }
                 catch (InvalidOperationException)
                 {
-                    hint = "Состав шлейфа изменился. " + hint;
+                    var byId = devices.ToDictionary(device => device.UniqueId);
+                    retained = saved.Order.Distinct().Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+                    var kept = new HashSet<string>(retained.Select(device => device.UniqueId));
+                    var added = devices.Where(device => !kept.Contains(device.UniqueId))
+                        .Select(LineConnectionOrder.Address).OrderBy(address => address).ToList();
+                    int removed = saved.Order.Distinct().Count(id => !byId.ContainsKey(id));
+                    changeHint = $"Состав шлейфа изменился. Добавлено: {added.Count}. Удалено: {removed}.";
+                    if (added.Count > 0)
+                        changeHint += " Новые адреса: " + string.Join(", ", added.Take(12)) + (added.Count > 12 ? "…" : ".");
                 }
                 catch (ArgumentException)
                 {
-                    hint = "Адреса изменились. " + hint;
+                    changeHint = "Адреса изменились. Проверьте порядок подключения.";
                 }
             }
+
+            var automatic = LineConnectionOrder.Suggest(doc, controller, devices, key, retained, estimateFromPlan, useRouteGrouping);
+            string automaticHint = (changeHint == null ? "" : changeHint + " ") + automatic.Hint;
             return new LineConnectionWindow.Line
             {
                 Key = key, Title = controllerName + " / шлейф " + key.Split('|')[3],
-                Controller = controllerName, Ring = ring, Devices = devices, Suggested = suggested, Walk = walk, Hint = hint,
+                Controller = controllerName, Ring = ring, Devices = devices, Suggested = confirmed ?? automatic.Devices,
+                Hint = confirmed == null ? automaticHint : "Показан подтверждённый порядок подключения. Сверьте его с трассой.",
+                AutomaticHint = automaticHint, Automatic = automatic, UsesAutomatic = confirmed == null,
             };
         }
 
@@ -269,7 +305,8 @@ namespace PluginForRevit2022
             {
                 var devices = DeviceLineOperations.DevicesOf(_doc, line.Key);
                 var controller = LineConnectionOrder.Controller(_doc, line.Key, line.Comment);
-                var review = PrepareConnection(_doc, line.Key, devices, controller, $"{line.Building}.ARK.{line.Controller}", true);
+                var review = PrepareConnection(_doc, line.Key, devices, controller, $"{line.Building}.ARK.{line.Controller}", true,
+                    estimateFromPlan: !renumber, useRouteGrouping: renumber);
                 var window = new LineConnectionWindow(new[] { review }, renumber ? "Применить новые адреса" : "Сохранить «По подключению»",
                     new WindowInteropHelper(this).Handle, renumber);
                 if (window.ShowDialog() != true) return;
@@ -365,12 +402,18 @@ namespace PluginForRevit2022
             var window = new Window { Owner = this, Title = title, Width = 580,
                 SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var panel = new StackPanel { Margin = new Thickness(12) };
-            panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxHeight = 250 });
+            UI.AerBimAppearance.Apply(window);
+            panel.Children.Add(new ScrollViewer
+            {
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                MaxHeight = 250, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            });
             var field = new System.Windows.Controls.TextBox { Text = initial, Margin = new Thickness(0, 8, 0, 8) };
             panel.Children.Add(field);
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var next = Action("Предпросмотр", () => window.DialogResult = true, null);
             next.IsDefault = true;
+            UI.AerBimAppearance.Primary(window, next);
             buttons.Children.Add(new Button { Content = "Отмена", IsCancel = true });
             buttons.Children.Add(next);
             panel.Children.Add(buttons);

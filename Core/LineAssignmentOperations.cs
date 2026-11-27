@@ -39,7 +39,7 @@ namespace PluginForRevit2022.Core
             }
             if (segments.Count == 0)
             {
-                throw new InvalidOperationException("Нет трасс с ADSK_Группирование вида СПС_АЛС.прибор.линия.");
+                throw new InvalidOperationException("Нет трасс с группированием вида СПС_АЛС.прибор.линия.");
             }
 
             // Приборы: номер из ARBM_SP_ElementMark
@@ -48,8 +48,8 @@ namespace PluginForRevit2022.Core
             foreach (FamilyInstance device in new FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                          .WhereElementIsNotElementType().OfType<FamilyInstance>())
             {
-                string bco = device.LookupParameter(DeviceMarkingOperations.ParamBco)?.AsString()?.Trim();
-                string mark = device.LookupParameter(DeviceMarkingOperations.ParamMark)?.AsString()?.Trim();
+                string bco = RevitText.FindParameter(device, DeviceMarkingOperations.ParamBco)?.AsString()?.Trim();
+                string mark = RevitText.FindParameter(device, DeviceMarkingOperations.ParamMark)?.AsString()?.Trim();
                 if (string.IsNullOrEmpty(bco) || bco.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) < 0 || !int.TryParse(mark, out int number)) continue;
                 string key = number.ToString();
                 if (controllers.ContainsKey(key)) duplicateControllers.Add(key);
@@ -113,7 +113,7 @@ namespace PluginForRevit2022.Core
                     ["controller"] = parts[0],
                     ["lineNumber"] = parts[1],
                     ["controllerElementId"] = controller == null ? (object)null : RevitIds.IdOf(controller.Id),
-                    ["controllerMark"] = controller == null ? null : controller.LookupParameter("Марка")?.AsString() ?? controller.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString(),
+                    ["controllerMark"] = controller == null ? null : RevitText.FindParameter(controller, "Марка")?.AsString() ?? controller.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString(),
                     ["controllerBuilding"] = controller == null ? null : Read(controller, DeviceMarkingOperations.ParamBuilding),
                     ["cables"] = cablesPerLine[line],
                     ["devices"] = members.Count,
@@ -150,7 +150,7 @@ namespace PluginForRevit2022.Core
         /// <summary>«СПС_АЛС.1.2» → «1.2»; null, если вида прибор.линия нет.</summary>
         private static string LineOf(Element element)
         {
-            string value = element.LookupParameter(DeviceMarkingOperations.ParamGrouping)?.AsString();
+            string value = DeviceMarkingOperations.ReadGrouping(element);
             if (string.IsNullOrWhiteSpace(value)) return null;
             string[] parts = value.Split('.');
             if (parts.Length < 3) return null;
@@ -163,7 +163,7 @@ namespace PluginForRevit2022.Core
         {
             // Как журнал: этаж из настроенного параметра → уровень с этим номером в имени (кабель под перекрытием Этажа 04
             // с этажом 3 — это Этаж 03); иначе «Уровень» и основа.
-            if (int.TryParse(element.LookupParameter(floorParameter)?.AsString()?.Trim(), out int floor))
+            if (int.TryParse(RevitText.FindParameter(element, floorParameter)?.AsString()?.Trim(), out int floor))
             {
                 Level byNumber = new FilteredElementCollector(element.Document).OfClass(typeof(Level)).Cast<Level>()
                     .FirstOrDefault(l => { var m = System.Text.RegularExpressions.Regex.Match(l.Name ?? "", @"-?\d+"); return m.Success && int.Parse(m.Value) == floor; });
@@ -190,6 +190,6 @@ namespace PluginForRevit2022.Core
             return Math.Sqrt(dx * dx + dy * dy);
         }
 
-        private static string Read(Element element, string name) => element.LookupParameter(name)?.AsString()?.Trim() ?? "";
+        private static string Read(Element element, string name) => RevitText.FindParameter(element, name)?.AsString()?.Trim() ?? "";
     }
 }

@@ -1,4 +1,5 @@
-﻿using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
+﻿using PluginForRevit2022.Core;
+using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
 using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using Autodesk.Revit.DB;
@@ -37,8 +38,8 @@ namespace ARBM.CableJournalExporter.Services
 
             foreach (var ctrl in controllers)
             {
-                string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                string floorParam = ctrl.LookupParameter(floorParameter)?.AsString();
+                string name = RevitText.FindParameter(ctrl, "ARBM_ПС_Имя изделия")?.AsString();
+                string floorParam = RevitText.FindParameter(ctrl, floorParameter)?.AsString();
 
                 // Проверка 1: Параметр не заполнен (пусто, null или только пробелы)
                 if (string.IsNullOrWhiteSpace(name))
@@ -170,10 +171,10 @@ namespace ARBM.CableJournalExporter.Services
 
             foreach (var dev in devices)
             {
-                string floor = dev.LookupParameter(floorParameter)?.AsString();
-                string bco = dev.LookupParameter("ARBM_ПСБ_БЦО")?.AsString();
-                string address = dev.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString();
-                string mark = dev.LookupParameter("ARBM_SP_ElementMark")?.AsString();
+                string floor = RevitText.FindParameter(dev, floorParameter)?.AsString();
+                string bco = RevitText.FindParameter(dev, "ARBM_ПСБ_БЦО")?.AsString();
+                string address = RevitText.FindParameter(dev, "ARBM_ПСБ_Адрес устройства")?.AsString();
+                string mark = RevitText.FindParameter(dev, "ARBM_SP_ElementMark")?.AsString();
 
                 // Проверка 1: Заполнение параметров
                 if (string.IsNullOrWhiteSpace(floor))

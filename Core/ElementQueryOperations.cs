@@ -124,7 +124,7 @@ namespace PluginForRevit2022.Core
                 };
                 foreach (string name in columns)
                 {
-                    row.Add(RevitText.ValueText(e.LookupParameter(name) ?? type?.LookupParameter(name)));
+                    row.Add(RevitText.ValueText(RevitText.FindParameter(e, name) ?? RevitText.FindParameter(type, name)));
                 }
                 text.AppendLine(string.Join(";", row.Select(Cell)));
             }

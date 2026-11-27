@@ -1,6 +1,6 @@
-﻿using ARBM.CableJournalExporter.Models;
+using PluginForRevit2022.Core;
+using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
-using ARBM.CableJournalExporter.Services;
 using ARBM.CableJournalExporter.Services;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using Autodesk.Revit.Attributes;
@@ -178,12 +178,6 @@ namespace ARBM.CableJournalExporter.Commands
                 // BLOCK 1️⃣: Select element with Comments parameter
                 // =================================================================
                 
-                // Информируем пользователя о необходимом действии
-                // EN: Inform user about the required action
-                TaskDialog.Show("Select element",
-                    "Select one element with a filled system parameter \"Comments\".\n" +
-                    "Allowed categories: MechanicalEquipment, ElectricalEquipment, DataDevices.");
-
                 // Запрашиваем выбор одного элемента, используя кастомный фильтр CommentsFilter
                 // Фильтр ограничивает выбор только элементами из разрешенных категорий,
                 // у которых уже установлено значение параметра Comments
@@ -192,7 +186,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // that already have Comments parameter set
                 Reference pickedRef = uidoc.Selection.PickObject(
                     ObjectType.Element,
-                    new CommentsFilter());
+                    new CommentsFilter(), "Выберите элемент с заполненным параметром «Комментарии» для КЖ СОТС");
 
                 // Если пользователь отменил выбор (нажал Escape или закрыл диалог)
                 // EN: If user cancelled selection (pressed Escape or closed dialog)
@@ -215,8 +209,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Verify that Comments value is not empty
                 if (string.IsNullOrWhiteSpace(paramValue))
                 {
-                    TaskDialog.Show("Error",
-                        "Selected element does not contain a valid Comments parameter.");
+                    TaskDialog.Show("Ошибка формирования КЖ",
+                        "У выбранного элемента не заполнен параметр «Комментарии».");
                     return Result.Cancelled;
                 }
 
@@ -237,8 +231,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Verify that a file was selected
                 if (string.IsNullOrWhiteSpace(templatePath))
                 {
-                    TaskDialog.Show("Cancel",
-                        "Excel template not selected. Command aborted.");
+                    TaskDialog.Show("Формирование КЖ отменено",
+                        "Шаблон Excel не выбран.");
                     return Result.Cancelled;
                 }
 
@@ -263,7 +257,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: If validation failed — show error and abort command
                 if (!validation.IsValid)
                 {
-                    TaskDialog.Show("Template error", validation.Message);
+                    TaskDialog.Show("Ошибка шаблона КЖ", validation.Message);
                     return Result.Failed;
                 }
 
@@ -341,8 +335,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Verify that some records were generated
                 if (records.Count == 0)
                 {
-                    TaskDialog.Show("No data",
-                        "No CableRecord entries were generated.");
+                    TaskDialog.Show("Нет данных для КЖ",
+                        "Не сформировано ни одной строки кабельного журнала. Проверьте маркировку устройств и наличие трасс для выбранной линии.");
                     return Result.Cancelled;
                 }
 
@@ -359,8 +353,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Verify that a save path was selected
                 if (string.IsNullOrWhiteSpace(savePath))
                 {
-                    TaskDialog.Show("Cancel",
-                        "Save file not selected. Command aborted.");
+                    TaskDialog.Show("Формирование КЖ отменено",
+                        "Файл для сохранения кабельного журнала не выбран.");
                     return Result.Cancelled;
                 }
 
@@ -393,12 +387,17 @@ namespace ARBM.CableJournalExporter.Commands
                 
                 // Выводим пользователю сообщение об успешном завершении с путём к файлу
                 // EN: Show user success message with file path
-                TaskDialog.Show("Done",
-                    $"Cable journal successfully created:\n{savePath}");
+                TaskDialog.Show("Кабельный журнал сформирован",
+                    $"Журнал сохранён в файл\n{savePath}");
 
                 // Возвращаем код успешного выполнения команды
                 // EN: Return success code
                 return Result.Succeeded;
+            }
+            catch (CableWalk.TunnelException ex)
+            {
+                TaskDialog.Show(CableWalk.TunnelErrorTitle, ex.Message);
+                return Result.Failed;
             }
             catch (Exception ex)
             {
@@ -411,8 +410,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // выводим полный текст ошибки пользователю
                 // EN: If an unhandled exception occurred (not one of expected results),
                 // show full error text to user
-                TaskDialog.Show("Error",
-                    $"An error occurred:\n{ex.Message}");
+                TaskDialog.Show("Ошибка формирования КЖ",
+                    $"При формировании журнала произошла ошибка.\n{ex.Message}");
                 
                 // Возвращаем код ошибки
                 // EN: Return error code

@@ -1,4 +1,4 @@
-﻿    using ARBM.CableJournalExporter.Models;
+    using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
 using ARBM.CableJournalExporter.Services;
 using Autodesk.Revit.Attributes;
@@ -67,14 +67,6 @@ namespace ARBM.CableJournalExporter.Commands
                 // BLOCK 1️⃣: Select element with Comments parameter
                 // =================================================================
 
-                // Информируем пользователя о необходимом действии
-                // EN: Inform user about the required action
-                if (ReviewConnectionOrder) RevitTaskDialog.Show(ConnectionTitle, "Выберите размеченное устройство нужного шлейфа АПС.");
-                else TaskDialog.Show("Select element",
-                    "Select one element with a filled system parameter \"Comments = АПС\".\n" +
-                    "Allowed categories: MechanicalEquipment, ElectricalEquipment, DataDevices," +
-                    " OST_FireAlarmDevices.");
-
                 // Запрашиваем выбор одного элемента, используя кастомный фильтр CommentsFilter
                 // Фильтр ограничивает выбор только элементами из разрешенных категорий,
                 // у которых уже установлено значение параметра Comments
@@ -84,7 +76,7 @@ namespace ARBM.CableJournalExporter.Commands
                 Reference pickedRef;
                 try
                 {
-                    pickedRef = uidoc.Selection.PickObject(ObjectType.Element, new CommentsFilter());
+                    pickedRef = uidoc.Selection.PickObject(ObjectType.Element, new CommentsFilter(), ReviewConnectionOrder ? "Выберите размеченное устройство нужного шлейфа АПС" : "Выберите элемент с комментарием для КЖ АПС");
                 }
                 catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                 {
@@ -112,8 +104,8 @@ namespace ARBM.CableJournalExporter.Commands
                 // EN: Verify that Comments value is not empty
                 if (string.IsNullOrWhiteSpace(paramValue))
                 {
-                    TaskDialog.Show("Error",
-                        "Selected element does not contain a valid Comments parameter.");
+                    TaskDialog.Show("Ошибка формирования КЖ",
+                        "У выбранного элемента не заполнен параметр «Комментарии».");
                     return Result.Cancelled;
                 }
 
@@ -150,7 +142,7 @@ namespace ARBM.CableJournalExporter.Commands
                 {
                     // watchdog сработал — лог и корректное завершение
                     ExecutionLogger.Log("ExportApsCableJournalCommand", "cancelled_by_watchdog", details: cancelMonitor.CancelReason);
-                    TaskDialog.Show("Cancelled", "Operation cancelled (timeout). See log for details.");
+                    TaskDialog.Show("Формирование КЖ прервано", "Истекло время ожидания. Подробности приведены в журнале работы плагина.");
                     return Result.Cancelled;
                 }
 
@@ -189,7 +181,6 @@ namespace ARBM.CableJournalExporter.Commands
 
                     var byId = entry.loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
                     entry.loop.Devices = reviewed.Order.Select(id => byId[id]).ToList();
-                    entry.loop.ConnectionLineKey = reviewed.Key;
                     entry.controller.Loops = new List<ApsLoopGroup> { entry.loop };
                     apsControllersWithLoops = new List<ApsControllerWithLoops> { entry.controller };
 
@@ -209,10 +200,15 @@ namespace ARBM.CableJournalExporter.Commands
                     // Перенёс Build так, чтобы он принимал монитор (будет проксировать в калькулятор графов)
                     records = builder.Build(apsControllersWithLoops, paramValue, cancelMonitor);
                 }
+                catch (CableWalk.TunnelException ex)
+                {
+                    RevitTaskDialog.Show(CableWalk.TunnelErrorTitle, ex.Message);
+                    return Result.Failed;
+                }
                 catch (OperationCanceledException)
                 {
                     ExecutionLogger.Log("ExportApsCableJournalCommand", "cancelled_by_watchdog", details: cancelMonitor.CancelReason);
-                    TaskDialog.Show("Cancelled", "Operation cancelled (timeout). See log for details.");
+                    TaskDialog.Show("Формирование КЖ прервано", "Истекло время ожидания. Подробности приведены в журнале работы плагина.");
                     return Result.Cancelled;
                 }
                 finally
@@ -222,8 +218,8 @@ namespace ARBM.CableJournalExporter.Commands
 
                 if (records == null || records.Count == 0)
                 {
-                    TaskDialog.Show("No data",
-                        "No CableRecord entries were generated.");
+                    TaskDialog.Show("Нет данных для КЖ",
+                        "Не сформировано ни одной строки кабельного журнала. Проверьте маркировку устройств и наличие трасс для выбранной линии.");
                     return Result.Cancelled;
                 }
 
@@ -235,8 +231,8 @@ namespace ARBM.CableJournalExporter.Commands
                 string savePath = dialog.SelectSaveLocation();
                 if (string.IsNullOrWhiteSpace(savePath))
                 {
-                    TaskDialog.Show("Cancel",
-                        "Save file not selected. Command aborted.");
+                    TaskDialog.Show("Формирование КЖ отменено",
+                        "Файл для сохранения кабельного журнала не выбран.");
                     return Result.Cancelled;
                 }
 

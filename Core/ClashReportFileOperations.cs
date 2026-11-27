@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Media.Imaging;
+using Autodesk.Revit.DB;
 using PluginForRevit2022.Core.Clashes;
 using PluginForRevit2022.Mcp;
 
@@ -45,7 +46,10 @@ namespace PluginForRevit2022.Core
             return items[0];
         }
 
-        public static object Manage(string author, McpArgs args)
+        internal static bool InModel(ClashItem item, IList<string> modelNames) =>
+            ClashRevit.IsModel(item.Item1.File, modelNames) || ClashRevit.IsModel(item.Item2.File, modelNames);
+
+        public static object Manage(Document doc, string author, McpArgs args)
         {
             var report = Read(args.StringList("reportPaths"));
             string action = args.String("action") ?? "list";
@@ -86,10 +90,29 @@ namespace PluginForRevit2022.Core
             }
             else if (action == "export")
             {
-                string target = DiagnosticFiles.Target(args.String("savePath"), ".xlsx", args.Bool("overwrite") ?? false);
+                string scope = args.String("scope") ?? "all";
+                var items = report.Items;
+                if (scope == "active_model")
+                {
+                    var modelNames = ClashRevit.ModelNames(doc);
+                    if (doc == null || doc.IsFamilyDocument || modelNames.Count == 0)
+                        throw new InvalidOperationException("Для scope=active_model откройте проект Revit.");
+                    items = items.Where(item => InModel(item, modelNames)).ToList();
+                }
+                else if (scope != "all") throw new ArgumentException("scope: all или active_model.");
+
+                bool overwrite = args.Bool("overwrite") ?? false;
+                string target = DiagnosticFiles.Target(args.String("savePath"), ".xlsx", overwrite);
                 if (report.Files.Any(f => string.Equals(f, target, StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("Результат не должен заменять исходный отчёт.");
-                if (!dry) ClashExcel.Write(report.Items, target, args.Bool("overwrite") ?? false);
-                result["records"] = report.Items.Count; result["savePath"] = target; result["saved"] = !dry;
+                if (!dry)
+                {
+                    ElementIdJournal.FlushAll();
+                    ClashExcel.Write(items, target, overwrite);
+                }
+                result["scope"] = scope;
+                result["records"] = items.Count;
+                result["savePath"] = target;
+                result["saved"] = !dry;
             }
             else throw new ArgumentException("action: list, update или export.");
             return result;

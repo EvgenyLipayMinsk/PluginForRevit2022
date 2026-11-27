@@ -21,7 +21,8 @@ namespace PluginForRevit2022.Core
 
         private static List<CableRecord> Records(Document doc, McpArgs args, List<string> messages) => CableJournalOperations.Calculate(doc, new CableJournalRequest
         {
-            System = args.String("system"), Comments = args.String("comments"), ParameterStandard = args.String("parameterStandard"), DryRun = true,
+            System = args.String("system"), Comments = args.String("comments"), ParameterStandard = args.String("parameterStandard"),
+            ControllerElementId = args.Long("controllerElementId"), DryRun = true,
         }, messages);
 
         public static object Explain(Document doc, McpArgs args)

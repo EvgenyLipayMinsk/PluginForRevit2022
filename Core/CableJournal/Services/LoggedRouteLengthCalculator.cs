@@ -103,7 +103,7 @@ namespace ARBM.CableJournalExporter.Services
         /// Builds graphs by level for Souye system and logs counts and timings around the call.
         /// Accepts optional <paramref name="cancel"/> to support cooperative cancellation.
         /// </summary>
-        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "", CancellationMonitor cancel = null)
+        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "", CancellationMonitor cancel = null, Func<Element, bool> routeFilter = null)
         {
             var sw = Stopwatch.StartNew();
             ExecutionLogger.Log("BuildGraphsByLevel", "start", details: $"filterParam={filterParam},souye=true");
@@ -120,7 +120,7 @@ namespace ARBM.CableJournalExporter.Services
             try
             {
                 // Delegate to original implementation.
-                _inner.BuildGraphsByLevel(doc, data, filterParam, cancel);
+                _inner.BuildGraphsByLevel(doc, data, filterParam, cancel, routeFilter);
             }
             catch (OperationCanceledException oce)
             {

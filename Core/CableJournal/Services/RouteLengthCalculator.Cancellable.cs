@@ -60,7 +60,7 @@ namespace ARBM.CableJournalExporter.Services
         /// Calls the original BuildGraphsByLevel(doc, data, filterParam) implementation
         /// but sets CurrentOperation and checks cancellation before and after the call.
         /// </summary>
-        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "", CancellationMonitor cancel = null)
+        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam, CancellationMonitor cancel, Func<Element, bool> routeFilter = null)
         {
             // Quick pre-check
             if (cancel?.IsCancellationRequested == true)
@@ -76,7 +76,7 @@ namespace ARBM.CableJournalExporter.Services
             {
                 // Delegate to existing implementation (same class, original method without CancellationMonitor).
                 // Overload resolution will call the original BuildGraphsByLevel(Document, SouyeControllerWithLoops, string)
-                BuildGraphsByLevel(doc, data, filterParam);
+                BuildGraphsByLevel(doc, data, filterParam, routeFilter);
             }
             catch (OperationCanceledException)
             {

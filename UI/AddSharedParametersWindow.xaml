@@ -3,23 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Добавить параметры из ФОП" Width="900" Height="680" MinWidth="700" MinHeight="500"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" FontSize="12">
-    <Window.Resources>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,4"/>
-            <Setter Property="Margin" Value="4,0,0,0"/>
-            <Setter Property="MinWidth" Value="90"/>
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="3,2"/>
-        </Style>
-    </Window.Resources>
-
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="140"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -43,14 +31,14 @@
                 <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Параметры ФОП" Margin="0,0,0,4"/>
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                     <TextBlock x:Name="ParameterCountText" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="Gray"/>
-                    <TextBox x:Name="ParameterSearchBox" TextChanged="OnParameterSearchChanged" ToolTip="Поиск по имени или группе"/>
+                    <TextBox x:Name="ParameterSearchBox" TextChanged="OnParameterSearchChanged" AutomationProperties.Name="Поиск параметров" ToolTip="Поиск по имени или группе"/>
                 </DockPanel>
                 <ListBox x:Name="ParameterList" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.GroupStyle>
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,6,0,2" Foreground="#FF2B579A"/>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,6,0,2" Foreground="{DynamicResource AerBim.SectionForeground}"/>
                                 </DataTemplate>
                             </GroupStyle.HeaderTemplate>
                         </GroupStyle>
@@ -58,7 +46,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" ToolTip="{Binding Tooltip}">
-                                <TextBlock>
+                                <TextBlock TextWrapping="Wrap">
                                     <Run Text="{Binding Name, Mode=OneWay}"/>
                                     <Run Text="{Binding DataType, Mode=OneWay}" Foreground="Gray"/>
                                 </TextBlock>
@@ -91,7 +79,7 @@
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                         <CheckBox x:Name="OnlyCheckedCategoriesBox" DockPanel.Dock="Right" Content="выбранные" VerticalAlignment="Center"
                                   Margin="6,0,0,0" Checked="OnCategoryFilterChanged" Unchecked="OnCategoryFilterChanged"/>
-                        <TextBox x:Name="CategorySearchBox" TextChanged="OnCategoryFilterChanged" ToolTip="Поиск категории"/>
+                        <TextBox x:Name="CategorySearchBox" TextChanged="OnCategoryFilterChanged" AutomationProperties.Name="Поиск категорий" ToolTip="Поиск категории"/>
                     </DockPanel>
                     <ListBox x:Name="CategoryList">
                         <ListBox.ItemTemplate>
@@ -104,15 +92,16 @@
             </DockPanel>
         </Grid>
 
-        <TextBlock Grid.Row="2" Text="Результат" FontWeight="SemiBold" Margin="0,8,0,4"/>
-        <TextBox Grid.Row="3" x:Name="ResultBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                 FontFamily="Consolas" Background="#FFF7F7F7"/>
+        <Expander Grid.Row="2" x:Name="ResultPanel" Header="Результат" Margin="0,8,0,0">
+            <TextBox x:Name="ResultBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.Name="Результат проверки или добавления" MaxHeight="140"/>
+        </Expander>
 
-        <DockPanel Grid.Row="4" Margin="0,10,0,0" LastChildFill="False">
+        <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="False">
             <TextBlock x:Name="SelectionText" DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="Gray"/>
             <Button DockPanel.Dock="Right" Content="Закрыть" IsCancel="True" Click="OnClose"/>
-            <Button DockPanel.Dock="Right" x:Name="ApplyButton" Content="Добавить" FontWeight="SemiBold" Click="OnApply"/>
-            <Button DockPanel.Dock="Right" Content="Предпросмотр" Click="OnPreview"/>
+            <Button DockPanel.Dock="Right" Margin="8,0,8,0" x:Name="ApplyButton" Content="Добавить" FontWeight="SemiBold" Click="OnApply"/>
+            <Button DockPanel.Dock="Right" x:Name="PreviewButton" Content="Предпросмотр" Click="OnPreview"/>
         </DockPanel>
     </Grid>
 </Window>

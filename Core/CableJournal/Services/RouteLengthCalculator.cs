@@ -1,4 +1,5 @@
-﻿using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
+using PluginForRevit2022.Core;
+using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
 using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using ARBM.CableJournalExporter.Systems.Souye.Models;
@@ -40,7 +41,7 @@ namespace ARBM.CableJournalExporter.Services
         /// • добавления специальных узлов переходов между уровнями.  
         /// </para>
         /// </summary>
-        private const string TRANSITION_FAMILY_NAME = "ARBM_Межэтажный переход";
+        private const string TRANSITION_FAMILY_NAME = CableWalk.TransitionFamily;
         // ============================================================
         // Граф
         // ============================================================
@@ -63,6 +64,7 @@ namespace ARBM.CableJournalExporter.Services
                 /// Z‑coordinate is typically aligned with the level elevation.
                 /// </summary>
                 public XYZ Point;
+                public bool IsShaftNode;
 
                 /// <summary>
                 /// Gets the list of edges connected to this node.
@@ -513,7 +515,6 @@ namespace ARBM.CableJournalExporter.Services
         /// Transition nodes represent vertical connection points between levels
         /// (e.g., virtual risers used to connect graphs of different floors).
         /// </summary>
-        private Dictionary<long, List<Graph.Node>> _transitionNodesByLevel = new Dictionary<long, List<Graph.Node>>();
 
         /// <summary>
         /// Provides read‑only access to the cached Revit levels.
@@ -535,6 +536,7 @@ namespace ARBM.CableJournalExporter.Services
         /// <param name="doc">The active Revit document.</param>
         private void CacheLevels(Document doc)
         {
+            CableWalk.ResetLevels();
 #if REVIT2021 || REVIT2022 || REVIT2023
     _levelsById = new FilteredElementCollector(doc)
         .OfClass(typeof(Level))
@@ -567,13 +569,10 @@ namespace ARBM.CableJournalExporter.Services
         /// </summary>
         private long GetLevelIdFromFloorNumber(Element el)
         {
-            string floor = el.LookupParameter(_floorParameter)?.AsString()?.Trim();
-            if (string.IsNullOrEmpty(floor) || !int.TryParse(floor, out int number)) return -1;
-            foreach (var pair in _levelsById)
-            {
-                var match = System.Text.RegularExpressions.Regex.Match(pair.Value.Name ?? "", @"-?\d+");
-                if (match.Success && int.Parse(match.Value) == number) return pair.Key;
-            }
+            Level configured = CableWalk.ConfiguredLevel(el, _floorParameter, CableWalk.ProjectLevels(el.Document));
+            if (configured != null) return RevitIds.IdOf(configured.Id);
+            string floor = RevitText.ValueText(RevitText.FindParameter(el, _floorParameter))?.Trim();
+            if (!int.TryParse(floor, out _)) return -1;
             XYZ point = el.Location is LocationPoint lp ? lp.Point
                 : el.Location is LocationCurve lc ? (lc.Curve.GetEndPoint(0) + lc.Curve.GetEndPoint(1)) / 2 : null;
             if (point == null) return -1;
@@ -639,25 +638,9 @@ namespace ARBM.CableJournalExporter.Services
         /// <returns>The numeric level ID, or -1 if unresolved.</returns>
         public long GetLevelIdForDevice(Document doc, FamilyInstance fi)
         {
-            // 1) Попытка получить уровень из настроенного параметра этажа
-            var p = fi.LookupParameter(_floorParameter);
-            if (p != null && p.StorageType == StorageType.String)
-            {
-                string floorName = p.AsString();
-                if (!string.IsNullOrEmpty(floorName))
-                {
-                    var lvl = _levelsById.Values
-                        .FirstOrDefault(l => l.Name.Equals(floorName, StringComparison.OrdinalIgnoreCase));
-
-#if REVIT2021 || REVIT2022 || REVIT2023
-            if (lvl != null)
-                return lvl.Id.IntegerValue;
-#elif REVIT2024
-                    if (lvl != null)
-                        return lvl.Id.Value;
-#endif
-                }
-            }
+            if (fi == null) return -1;
+            Level configured = CableWalk.ConfiguredLevel(fi, _floorParameter, CableWalk.ProjectLevels(doc));
+            if (configured != null) return RevitIds.IdOf(configured.Id);
 
             // 2) Попытка получить уровень через Host
             long hostLevelId = GetLevelIdFromHost(fi);
@@ -705,461 +688,92 @@ namespace ARBM.CableJournalExporter.Services
 
 
 
-        // ============================================================
-        // Обнаружение и добавление переходов
-        // ============================================================
+        private string _tunnelDetails;
 
-        /// <summary>
-        /// Собрать все семейства "ARBM_Межэтажный переход" и добавить их как узлы в соответствующие графы.
-        /// Проверяет дублирование узлов по координатам и ID элемента.
-        /// </summary>
-        /// /// <summary>
-        /// Collects all "ARBM_Межэтажный переход" (inter-floor transition) family instances
-        /// and adds them as nodes into the corresponding level graphs.
-        /// Also checks for duplicate transition nodes by element ID and by coordinates
-        /// within the document short curve tolerance.
-        /// </summary>
-        /// <param name="doc">The active Revit document.</param>
-        private void AddTransitionFamilies(Document doc)
+        private void AddTunnels(Document doc, string comment)
         {
-            // Очищаем словарь переходных узлов по уровням.
-            // EN: Clear the dictionary that stores transition nodes grouped by level.
-            _transitionNodesByLevel.Clear();
-
-            // Создаём коллектор, который ищет все экземпляры оборудования (MechanicalEquipment),
-            // исключая типы элементов, и приводим их к FamilyInstance.
-            // EN: Collect all mechanical equipment instances (not types) as FamilyInstance.
-            var collector = new FilteredElementCollector(doc)
-                .OfCategory(BuiltInCategory.OST_MechanicalEquipment)
-                .WhereElementIsNotElementType()
-                .OfType<FamilyInstance>();
-
-            // Получаем допуск документа для сравнения координат.
-            // EN: Get Revit's short curve tolerance for coordinate comparison.
-            double tol = doc.Application.ShortCurveTolerance;
-
-            // Перебираем все найденные семейства оборудования.
-            // EN: Iterate through all collected mechanical equipment instances.
-            foreach (var fi in collector)
+            var spans = new List<CableWalk.RouteSpan>();
+            var graphEdges = new List<Graph.Edge>();
+            var comments = new Dictionary<long, string>();
+            foreach (var pair in _graphsByLevel)
             {
-                // Пропускаем всё, что не является семейством межэтажного перехода.
-                // EN: Skip all families except the transition family.
-                if (fi.Symbol.FamilyName != "ARBM_Межэтажный переход")
-                    continue;
-
-                // Получаем точку вставки семейства.
-                // EN: Get the insertion point (LocationPoint).
-                var lp = fi.Location as LocationPoint;
-
-                // Если у семейства нет точки вставки — пропускаем.
-                // EN: If no location point exists — skip.
-                if (lp == null)
-                    continue;
-
-                // Определяем ID уровня, на котором размещено устройство.
-                // EN: Determine the level ID for this device.
-                long levelId = GetLevelIdForDevice(doc, fi);
-
-                // Если уровень определить не удалось — пропускаем.
-                // EN: If level cannot be determined — skip.
-                if (levelId == -1)
-                    continue;
-
-                // Гарантируем, что граф для уровня существует.
-                // EN: Ensure that a graph exists for this level.
-                if (!_graphsByLevel.ContainsKey(levelId))
-                    _graphsByLevel[levelId] = new Graph();
-
-                // Получаем граф уровня.
-                // EN: Retrieve the graph for this level.
-                var graph = _graphsByLevel[levelId];
-
-                // Получаем строковый ID элемента.
-                // EN: Get element ID as string.
-                string elementId = fi.Id.ToString();
-
-                // Если узел уже добавлен — пропускаем.
-                // EN: Skip if this device node already exists.
-                if (_deviceNodes.ContainsKey(elementId))
-                    continue;
-
-                // Определяем Z-координату: либо по уровню, либо по точке вставки.
-                // EN: Determine Z coordinate from level elevation or instance point.
-                double z = _levelsById.ContainsKey(levelId)
-                    ? _levelsById[levelId].Elevation
-                    : lp.Point.Z;
-
-                // Создаём XYZ точку устройства с корректной Z.
-                // EN: Create device point with corrected Z.
-                XYZ devicePoint = new XYZ(lp.Point.X, lp.Point.Y, z);
-
-                // Флаг дублирования.
-                // EN: Duplicate flag.
-                bool isDuplicate = false;
-
-                // Перебираем уже добавленные переходные узлы на этом уровне.
-                // EN: Iterate through existing transition nodes on this level.
-                foreach (var existingNode in _transitionNodesByLevel.ContainsKey(levelId)
-                    ? _transitionNodesByLevel[levelId]
-                    : new List<Graph.Node>())
+                foreach (Graph.Edge edge in pair.Value.Edges)
                 {
-                    // Если расстояние меньше допуска — это дубликат.
-                    // EN: If distance < tolerance — this is a duplicate.
-                    if (existingNode.Point.DistanceTo(devicePoint) < tol)
+                    if (edge.RouteElementId == 0) continue;
+                    if (!comments.TryGetValue(edge.RouteElementId, out string routeComment))
                     {
-                        isDuplicate = true;
+                        Element route = doc.GetElement(RevitIds.ToElementId(edge.RouteElementId));
+                        if (route == null) continue;
+                        comments.Add(edge.RouteElementId, routeComment = DeviceMarkingOperations.CommentOf(route));
+                    }
+                    spans.Add(new CableWalk.RouteSpan
+                    {
+                        A = edge.A.Point, B = edge.B.Point, Level = pair.Key,
+                        ElementId = edge.RouteElementId, Comment = routeComment,
+                    });
+                    graphEdges.Add(edge);
+                }
+            }
 
-                        // Показываем предупреждение пользователю.
-                        // EN: Show warning dialog about duplicate.
-                        TaskDialog.Show("Предупреждение",
-                            $"⚠️  Дублирование семейства '{TRANSITION_FAMILY_NAME}':\n\n" +
-                            $"Семейство с ID {elementId} размещено в точке, " +
-                            $"совпадающей с уже добавленным семейством на уровне {levelId}.\n\n" +
-                            $"Координаты: X={devicePoint.X:F2}, Y={devicePoint.Y:F2}, Z={devicePoint.Z:F2}.\n\n" +
-                            $"Это семейство будет пропущено.");
-                        break;
+            var tunnels = CableWalk.PlanTunnels(doc, spans, comment);
+            _tunnelDetails = tunnels.Details;
+            var shaftNodes = new Dictionary<CableWalk.ShaftPort, Graph.Node>();
+            var shaftsOnSpan = tunnels.Links.SelectMany(pair => new[] { pair.Lower, pair.Upper }).Distinct().GroupBy(port => port.Span);
+            foreach (var group in shaftsOnSpan)
+            {
+                Graph.Edge edge = graphEdges[group.Key];
+                CableWalk.RouteSpan span = spans[group.Key];
+                Graph graph = _graphsByLevel[span.Level];
+                Graph.Node previous = edge.A;
+                graph.RemoveEdge(edge);
+                foreach (var port in group.OrderBy(port => span.A.DistanceTo(port.Projection)))
+                {
+                    Graph.Node routeNode = port.Projection.DistanceTo(previous.Point) < 1e-6 ? previous :
+                        port.Projection.DistanceTo(edge.B.Point) < 1e-6 ? edge.B : graph.AddNode(port.Projection);
+                    if (routeNode != previous) graph.AddEdge(previous, routeNode, edge.Installation, edge.RouteElementId);
+                    previous = routeNode;
+                    var point = new XYZ(port.Point.X, port.Point.Y, routeNode.Point.Z);
+                    Graph.Node shaftNode = point.DistanceTo(routeNode.Point) < 1e-6 ? routeNode : graph.AddNode(point);
+                    if (shaftNode != routeNode)
+                    {
+                        shaftNode.IsShaftNode = true;
+                        graph.AddEdge(routeNode, shaftNode, edge.Installation);
+                    }
+                    shaftNodes.Add(port, shaftNode);
+                }
+                if (previous != edge.B) graph.AddEdge(previous, edge.B, edge.Installation, edge.RouteElementId);
+            }
+            foreach (var (lower, upper) in tunnels.Links)
+                _graphsByLevel[lower.Level].AddEdge(shaftNodes[lower], shaftNodes[upper]).Length = lower.Point.DistanceTo(upper.Point);
+        }
+
+        private bool CheckTunnel(long fromLevel, long toLevel, FamilyInstance from, FamilyInstance to)
+        {
+            if (fromLevel == toLevel) return true;
+            if (_deviceNodes.TryGetValue(from.Id.ToString(), out var start) &&
+                _deviceNodes.TryGetValue(to.Id.ToString(), out var end))
+            {
+                var visited = new HashSet<Graph.Node> { start };
+                var queue = new Queue<Graph.Node>();
+                queue.Enqueue(start);
+                while (queue.Count != 0)
+                {
+                    Graph.Node current = queue.Dequeue();
+                    if (current == end) return true;
+                    foreach (Graph.Edge edge in current.Edges)
+                    {
+                        Graph.Node next = edge.A == current ? edge.B : edge.A;
+                        if (visited.Add(next)) queue.Enqueue(next);
                     }
                 }
-
-                // Если дубликат найден — пропускаем добавление.
-                // EN: Skip adding if duplicate detected.
-                if (isDuplicate)
-                    continue;
-
-                // Добавляем узел перехода в граф уровня через общий метод AttachDeviceToGraphFixed.
-                // EN: Add transition node to the graph using AttachDeviceToGraphFixed.
-                var transitionNode = AttachDeviceToGraphFixed(
-                    graph, elementId, lp.Point, doc, levelId);
-
-                // Гарантируем, что список переходов для уровня существует.
-                // EN: Ensure transition list for this level exists.
-                if (!_transitionNodesByLevel.ContainsKey(levelId))
-                    _transitionNodesByLevel[levelId] = new List<Graph.Node>();
-
-                // Добавляем переходный узел в список уровня.
-                // EN: Add transition node to the level's list.
-                _transitionNodesByLevel[levelId].Add(transitionNode);
-            }
-        }
-
-
-        // ============================================================
-        // Анализ цепей и подключение уровней
-        // ============================================================
-        /// <summary>
-        /// Analyzes a device chain and determines which Revit levels are involved.
-        /// Returns a sorted list of unique level IDs referenced by the devices in the chain.
-        ///
-        /// <para><b>RU:</b></para>
-        /// Анализирует цепочку устройств и определяет, какие уровни Revit в неё входят.
-        /// Метод проходит по каждому устройству в цепи, вычисляет уровень, на котором оно
-        /// расположено (с учётом параметров семейства, хоста и координаты Z), и собирает
-        /// уникальные идентификаторы уровней.  
-        /// Возвращаемый список отсортирован по возрастанию и содержит только те уровни,
-        /// на которых реально присутствуют устройства из цепочки.
-        /// </summary>
-        ///
-        /// <param name="doc">
-        /// The active Revit document.
-        /// <para><b>RU:</b> Текущий документ Revit.</para>
-        /// </param>
-        ///
-        /// <param name="devices">
-        /// The collection of devices (family instances) that form the chain.
-        /// <para><b>RU:</b> Коллекция устройств (экземпляров семейств), которые образуют цепочку.</para>
-        /// </param>
-        ///
-        /// <returns>
-        /// A list of unique level IDs, sorted in ascending order, representing all levels
-        /// on which the devices in the chain are located.
-        /// 
-        /// <para><b>RU:</b></para>
-        /// Список уникальных идентификаторов уровней, отсортированный по возрастанию,
-        /// представляющий все уровни, на которых расположены устройства цепочки.
-        /// </returns>
-
-        private List<long> GetLevelsInChain(Document doc, IEnumerable<FamilyInstance> devices)
-        {
-            var levels = new SortedSet<long>();
-
-            foreach (var device in devices.ToList())
-            {
-                long levelId = GetLevelIdForDevice(doc, device);
-                if (levelId != -1)
-                    levels.Add(levelId);
             }
 
-            return levels.ToList();
-        }
+            string Floor(long id) => _levelsById.TryGetValue(id, out Level level) ? level.Name : id.ToString();
+            BuildError = TunnelError = $"Нет подтверждённого межэтажного хода между устройствами ID {from.Id} и {to.Id} " +
+                $"(«{Floor(fromLevel)}» → «{Floor(toLevel)}»). {_tunnelDetails}";
 
-        /// <summary>
-        /// Validates that inter-floor transition families are available on the specified levels.
-        /// Returns a localized error message if transitions are missing on one or both levels,
-        /// or <c>null</c> if the configuration is valid.
-        ///
-        /// <para><b>RU:</b></para>
-        /// Проверяет наличие семейств межэтажных переходов на указанных уровнях.
-        /// Метод используется перед созданием вертикальных связей между уровнями, чтобы убедиться,
-        /// что на каждом уровне присутствует хотя бы один экземпляр семейства
-        /// <c>ARBM_Межэтажный переход</c>.  
-        /// Если на одном или обоих уровнях отсутствуют такие семейства, возвращается
-        /// текст ошибки с подробным описанием проблемы.  
-        /// Если переходы присутствуют на обоих уровнях — возвращается <c>null</c>, что означает,
-        /// что уровни корректно подготовлены для построения межуровневых связей.
-        /// </summary>
-        ///
-        /// <param name="fromLevel">
-        /// The source level ID.
-        /// <para><b>RU:</b> Идентификатор исходного уровня.</para>
-        /// </param>
-        ///
-        /// <param name="toLevel">
-        /// The target level ID.
-        /// <para><b>RU:</b> Идентификатор целевого уровня.</para>
-        /// </param>
-        ///
-        /// <returns>
-        /// A string containing an error description when required transition families
-        /// are missing, or <c>null</c> if transitions are available on both levels.
-        /// 
-        /// <para><b>RU:</b></para>
-        /// Строка с описанием ошибки, если на одном или обоих уровнях отсутствуют
-        /// необходимые семейства межэтажных переходов.  
-        /// Возвращает <c>null</c>, если переходы присутствуют на обоих уровнях.
-        /// </returns>
-
-        private string ValidateTransitionAvailability(long fromLevel, long toLevel)
-        {
-            bool hasFromTransition = _transitionNodesByLevel.ContainsKey(fromLevel) &&
-                                     _transitionNodesByLevel[fromLevel].Count > 0;
-            bool hasToTransition = _transitionNodesByLevel.ContainsKey(toLevel) &&
-                                   _transitionNodesByLevel[toLevel].Count > 0;
-
-            if (!hasFromTransition && !hasToTransition)
-                return $"❌ Ошибка: На обоих уровнях ({fromLevel} и {toLevel}) отсутствуют семейства '{TRANSITION_FAMILY_NAME}'.";
-
-            if (!hasFromTransition)
-                return $"❌ Ошибка: На уровне {fromLevel} отсутствуют семейства '{TRANSITION_FAMILY_NAME}'.";
-
-            if (!hasToTransition)
-                return $"❌ Ошибка: На уровне {toLevel} отсутствуют семейства '{TRANSITION_FAMILY_NAME}'.";
-
-            return null; // OK
-        }
-        // Предполагаем, что у тебя есть:
-        // Dictionary<long, List<Graph.Node>> _transitionNodesByLevel;
-        // Dictionary<string, Graph.Node> _deviceNodes; // ключ = ElementId.ToString()
-        /// <summary>
-        /// Finds the transition node on the specified level that corresponds to the given device node.
-        /// The method attempts two strategies:
-        /// <para>
-        /// 1) If the device node is already connected to a transition node by an edge,
-        ///    that transition node is returned.
-        /// </para>
-        /// <para>
-        /// 2) If no direct connection exists, the nearest transition node (by geometric distance)
-        ///    is selected as a fallback.
-        /// </para>
-        ///
-        /// <para><b>RU:</b></para>
-        /// Находит узел межэтажного перехода на указанном уровне, который соответствует
-        /// переданному узлу устройства.  
-        /// Метод использует два последовательных подхода:
-        /// <para>
-        /// 1) Если устройство уже связано ребром с переходным узлом, возвращается именно этот узел.  
-        ///    Это гарантирует корректное использование заранее созданных связей графа.
-        /// </para>
-        /// <para>
-        /// 2) Если прямой связи нет, выбирается ближайший переходный узел по геометрическому расстоянию.  
-        ///    Такой механизм служит резервным вариантом и позволяет корректно работать даже при
-        ///    отсутствии явных связей или при частично построенном графе.
-        /// </para>
-        /// Если на уровне нет ни одного переходного узла, возвращается <c>null</c>.
-        /// </summary>
-        ///
-        /// <param name="levelId">
-        /// The level ID on which the search should be performed.
-        /// <para><b>RU:</b> Идентификатор уровня, на котором выполняется поиск.</para>
-        /// </param>
-        ///
-        /// <param name="deviceNode">
-        /// The graph node representing the device.
-        /// <para><b>RU:</b> Узел графа, соответствующий устройству.</para>
-        /// </param>
-        ///
-        /// <returns>
-        /// A <see cref="Graph.Node"/> representing the transition node, or <c>null</c>
-        /// if no transition nodes exist on the specified level.
-        /// 
-        /// <para><b>RU:</b></para>
-        /// Узел перехода (<see cref="Graph.Node"/>), если он найден, либо <c>null</c>,
-        /// если на уровне отсутствуют переходные узлы.
-        /// </returns>
-
-        private Graph.Node FindTransitionNodeForDevice(long levelId, Graph.Node deviceNode)
-        {
-            // Пытаемся получить список переходных узлов для указанного уровня.
-            // EN: Try to get the list of transition nodes for the given level.
-            if (!_transitionNodesByLevel.TryGetValue(levelId, out var transitions) ||
-                transitions == null || transitions.Count == 0)
-                // Если списка нет или он пуст — переходов на уровне нет → возвращаем null.
-                // EN: If no transitions exist on this level — return null.
-                return null;
-
-            // --- 1) Попытка №1: найти переходный узел, который уже связан ребром с устройством ---
-
-            // Берём все рёбра устройства, и для каждого определяем соседний узел:
-            // если A == deviceNode → сосед B, иначе A.
-            // EN: For each edge of the device node, determine the adjacent node.
-            var connected = deviceNode.Edges
-                .Select(e => e.A == deviceNode ? e.B : e.A)
-                // Ищем среди соседей тот, который является переходным узлом.
-                // EN: Find the first adjacent node that is a transition node.
-                .FirstOrDefault(n => transitions.Contains(n));
-
-            // Если нашли переходный узел, связанный ребром — возвращаем его.
-            // EN: If a directly connected transition node exists — return it.
-            if (connected != null)
-                return connected;
-
-            // --- 2) Попытка №2: если прямой связи нет — ищем ближайший переходный узел ---
-
-            // Сортируем переходные узлы по расстоянию до устройства
-            // и берём первый (минимальное расстояние).
-            // EN: Sort transition nodes by distance to the device and return the nearest one.
-            return transitions
-                .OrderBy(t => t.Point.DistanceTo(deviceNode.Point))
-                .FirstOrDefault();
-        }
-
-
-        /// <summary>
-        /// Соединяет два уровня только через transitionNodes:
-        /// - transitionNode текущего уровня, связанный с fromDevice;
-        /// - transitionNode следующего уровня, связанный с firstDeviceOnNextLevel.
-        /// </summary>
-        /// 
-        /// <summary>
-        /// Connects two levels using only their corresponding transition nodes.
-        /// This method establishes a vertical routing link between floors by:
-        /// <para>
-        /// • locating the transition node on the source level that is associated with <paramref name="fromDevice"/>  
-        /// • locating the transition node on the target level that is associated with <paramref name="firstDeviceOnNextLevel"/>
-        /// </para>
-        /// If both transition nodes exist and are not already connected, a bidirectional
-        /// edge is added between them, representing a virtual vertical riser.
-        ///
-        /// <para><b>RU:</b></para>
-        /// Соединяет два уровня, используя исключительно их переходные узлы (transition nodes).  
-        /// Метод формирует вертикальную связь между этажами, выполняя следующие шаги:
-        /// <para>
-        /// • определяет переходный узел на исходном уровне, связанный с устройством <paramref name="fromDevice"/>;  
-        /// • определяет переходный узел на целевом уровне, связанный с устройством <paramref name="firstDeviceOnNextLevel"/>.  
-        /// </para>
-        /// Если оба переходных узла найдены и между ними ещё нет связи, метод создаёт
-        /// двунаправленное ребро, представляющее виртуальный вертикальный стояк.  
-        /// Такая связь используется при построении маршрутов между устройствами,
-        /// расположенными на разных уровнях.
-        /// </summary>
-        ///
-        /// <param name="fromLevel">
-        /// The level ID of the device initiating the transition.
-        /// <para><b>RU:</b> Идентификатор уровня, на котором находится устройство, инициирующее переход.</para>
-        /// </param>
-        ///
-        /// <param name="toLevel">
-        /// The level ID of the next device in the chain.
-        /// <para><b>RU:</b> Идентификатор уровня, на котором находится следующее устройство в цепочке.</para>
-        /// </param>
-        ///
-        /// <param name="fromDevice">
-        /// The device on the source level whose transition node should be used
-        /// to establish the vertical connection.
-        /// <para><b>RU:</b> Устройство на исходном уровне, переходный узел которого используется для создания вертикальной связи.</para>
-        /// </param>
-        ///
-        /// <param name="firstDeviceOnNextLevel">
-        /// The first device on the target level whose transition node should be used
-        /// to complete the vertical connection.
-        /// <para><b>RU:</b> Первое устройство на целевом уровне, переходный узел которого используется для завершения вертикальной связи.</para>
-        /// </param>
-
-    private void ConnectLevelsByTransitions(
-     long fromLevel,
-     long toLevel,
-     FamilyInstance fromDevice,
-     FamilyInstance firstDeviceOnNextLevel)
-        {
-            // Проверяем, что графы для обоих уровней существуют.
-            // EN: Ensure that graphs for both levels exist.
-            if (!_graphsByLevel.ContainsKey(fromLevel) ||
-                !_graphsByLevel.ContainsKey(toLevel))
-                // Если хотя бы одного графа нет — связь построить невозможно.
-                // EN: If either graph is missing — cannot connect levels.
-                return;
-
-            // Получаем граф исходного уровня.
-            // EN: Retrieve graph for the source level.
-            var graphFrom = _graphsByLevel[fromLevel];
-
-            // Получаем граф целевого уровня.
-            // EN: Retrieve graph for the target level.
-            var graphTo = _graphsByLevel[toLevel];
-
-            // Пытаемся получить узел устройства на исходном уровне.
-            // EN: Try to get the graph node corresponding to the source device.
-            if (!_deviceNodes.TryGetValue(fromDevice.Id.ToString(), out var fromDevNode))
-                // Если узла нет — связь невозможна.
-                // EN: If device node not found — cannot proceed.
-                return;
-
-            // Пытаемся получить узел устройства на целевом уровне.
-            // EN: Try to get the graph node corresponding to the target-level device.
-            if (!_deviceNodes.TryGetValue(firstDeviceOnNextLevel.Id.ToString(), out var toDevNode))
-                // Если узла нет — связь невозможна.
-                // EN: If device node not found — cannot proceed.
-                return;
-
-            // --- Находим transitionNode на каждом уровне ---
-
-            // Ищем переходный узел, связанный с устройством на исходном уровне.
-            // EN: Find transition node associated with the source-level device.
-            var fromTrans = FindTransitionNodeForDevice(fromLevel, fromDevNode);
-
-            // Ищем переходный узел, связанный с устройством на целевом уровне.
-            // EN: Find transition node associated with the target-level device.
-            var toTrans = FindTransitionNodeForDevice(toLevel, toDevNode);
-
-            // Если хотя бы один переходный узел не найден — связь невозможна.
-            // EN: If either transition node is missing — cannot connect levels.
-            if (fromTrans == null || toTrans == null)
-                return;
-
-            // --- Проверяем, нет ли уже существующей связи между переходами ---
-
-            // Проверяем, есть ли ребро между fromTrans и toTrans.
-            // EN: Check if an edge already exists between the two transition nodes.
-            bool alreadyConnected =
-                fromTrans.Edges.Any(e => e.A == toTrans || e.B == toTrans) ||
-                toTrans.Edges.Any(e => e.A == fromTrans || e.B == fromTrans);
-
-            // Если связь уже есть — повторно её не создаём.
-            // EN: If already connected — do nothing.
-            if (alreadyConnected)
-                return;
-
-            // --- Создаём вертикальную связь между уровнями ---
-
-            // Добавляем ребро в граф исходного уровня.
-            // EN: Add edge in the source-level graph.
-            graphFrom.AddEdge(fromTrans, toTrans);
-
-            // Добавляем обратное ребро в граф целевого уровня.
-            // EN: Add reverse edge in the target-level graph.
-            graphTo.AddEdge(toTrans, fromTrans);
-        }
-
-        // ============================================================
+            return false;
+        }        // ============================================================
         // Строим графы по уровням
         // ============================================================
 
@@ -1248,6 +862,7 @@ namespace ARBM.CableJournalExporter.Services
         public void BuildGraphsByLevel(Document doc, List<ControllerWithLoops> controllers, string filterParam = "", Func<Element, bool> routeFilter = null)
         {
             BuildError = null;
+            TunnelError = null;
             // Кэшируем уровни Revit в локальную структуру.
             // EN: Cache all Revit levels into internal dictionary.
             CacheLevels(doc);
@@ -1262,7 +877,6 @@ namespace ARBM.CableJournalExporter.Services
 
             // Очищаем словарь переходных узлов.
             // EN: Reset transition node registry.
-            _transitionNodesByLevel.Clear();
 
             // Собираем все экземпляры MechanicalEquipment.
             // EN: Collect all mechanical equipment instances.
@@ -1358,7 +972,6 @@ namespace ARBM.CableJournalExporter.Services
             }
             // --- Шаг 1.5: Добавить семейства переходов
             // EN: Add transition families as nodes.
-            AddTransitionFamilies(doc);
 
             // --- Шаг 2: Автосшивка и разрезание рёбер
             // Радиус поиска для автосшивки (в футах).
@@ -1377,6 +990,8 @@ namespace ARBM.CableJournalExporter.Services
                 // EN: Split edges at intersections.
                 SplitEdgesByNodes(graph);
             }
+
+            AddTunnels(doc, filterParam);
 
             // --- Шаг 3: Привязка всех устройств всех контроллеров
             foreach (var ctrl in controllers)
@@ -1427,38 +1042,6 @@ namespace ARBM.CableJournalExporter.Services
                     // --- Обработка петель расширителя
                     foreach (var loop in exp.Loops)
                     {
-                        // 1) Определяем уровни устройств в петле.
-                        // EN: Determine levels in chain.
-                        var levelsInChain = GetLevelsInChain(doc, loop.Devices);
-
-                        // Гарантируем, что уровень расширителя — первый.
-                        // EN: Ensure expander level is first.
-                        if (levelsInChain.Count > 0 && levelsInChain[0] != expLevel)
-                            levelsInChain.Insert(0, expLevel);
-                        else if (levelsInChain.Count == 0)
-                            levelsInChain.Add(expLevel);
-
-                        // Проверяем наличие переходов между уровнями.
-                        // EN: Validate transitions.
-                        if (levelsInChain.Count > 1)
-                        {
-                            for (int i = 0; i < levelsInChain.Count - 1; i++)
-                            {
-                                long fromLevel = levelsInChain[i];
-                                long toLevel = levelsInChain[i + 1];
-
-                                string validationError = ValidateTransitionAvailability(fromLevel, toLevel);
-                                if (validationError != null)
-                                {
-                                    // Показываем ошибку структуры уровней.
-                                    // EN: Show validation error.
-                                    TaskDialog.Show("Ошибка структуры уровней", validationError);
-                                    BuildError = validationError;
-                                    return;
-                                }
-                            }
-                        }
-
                         // 2) Фактическое построение переходов
                         // Начинаем с расширителя.
                         // EN: Start from expander.
@@ -1491,18 +1074,10 @@ namespace ARBM.CableJournalExporter.Services
 
                             // Если устройство на другом уровне — создаём вертикальную связь.
                             // EN: Connect levels if changed.
-                            if (prevLevel != devLevel)
-                            {
-                                ConnectLevelsByTransitions(
-                                    prevLevel,
-                                    devLevel,
-                                    prevDev,   // расширитель или предыдущее устройство
-                                    dev        // первое устройство на новом уровне
-                                );
-                            }
 
                             // Обновляем предыдущие значения.
                             // EN: Update previous device and level.
+                            if (!CheckTunnel(prevLevel, devLevel, prevDev, dev)) return;
                             prevDev = dev;
                             prevLevel = devLevel;
                         }
@@ -1514,33 +1089,7 @@ namespace ARBM.CableJournalExporter.Services
                 {
                     // Определяем уровни устройств в петле.
                     // EN: Determine levels in chain.
-                    var levelsInChain = GetLevelsInChain(doc, loop.Devices);
 
-                    // Гарантируем, что уровень контроллера — первый.
-                    // EN: Ensure controller level is first.
-                    if (levelsInChain.Count > 0 && levelsInChain[0] != ctrlLevel)
-                        levelsInChain.Insert(0, ctrlLevel);
-                    else if (levelsInChain.Count == 0)
-                        levelsInChain.Add(ctrlLevel);
-
-                    // Проверяем наличие переходов между уровнями.
-                    // EN: Validate transitions.
-                    if (levelsInChain.Count > 1)
-                    {
-                        for (int i = 0; i < levelsInChain.Count - 1; i++)
-                        {
-                            long fromLevel = levelsInChain[i];
-                            long toLevel = levelsInChain[i + 1];
-
-                            string validationError = ValidateTransitionAvailability(fromLevel, toLevel);
-                            if (validationError != null)
-                            {
-                                TaskDialog.Show("Ошибка структуры уровней", validationError);
-                                BuildError = validationError;
-                                return;
-                            }
-                        }
-                    }
 
                     // 2) Построение графа по фактической последовательности устройств
                     // Начинаем с контроллера.
@@ -1574,18 +1123,10 @@ namespace ARBM.CableJournalExporter.Services
 
                         // Если уровень изменился — создаём вертикальную связь.
                         // EN: Connect levels if changed.
-                        if (prevLevel != devLevel)
-                        {
-                            ConnectLevelsByTransitions(
-                                prevLevel,
-                                devLevel,
-                                prevDev,   // контроллер или предыдущее устройство
-                                dev        // первое устройство на новом уровне
-                            );
-                        }
 
                         // Обновляем предыдущие значения.
                         // EN: Update previous device and level.
+                        if (!CheckTunnel(prevLevel, devLevel, prevDev, dev)) return;
                         prevDev = dev;
                         prevLevel = devLevel;
                     }
@@ -1673,6 +1214,7 @@ namespace ARBM.CableJournalExporter.Services
         public void BuildGraphsByLevel(Document doc, List<ApsControllerWithLoops> controllers, string filterParam = "")
         {
             BuildError = null;
+            TunnelError = null;
             // ============================================================
             // 0. Cache levels and reset internal structures
             // ============================================================
@@ -1680,7 +1222,6 @@ namespace ARBM.CableJournalExporter.Services
             CacheLevels(doc);
             _graphsByLevel.Clear();
             _deviceNodes.Clear();
-            _transitionNodesByLevel.Clear();
 
             // ============================================================
             // 1. Collect mechanical equipment (routing segments)
@@ -1701,7 +1242,6 @@ namespace ARBM.CableJournalExporter.Services
                 });
             }
 
-            if (ApsRouteFilter != null) filteredElements = filteredElements.Where(ApsRouteFilter);
 
             var allRoutes = new List<Element>();
 
@@ -1748,7 +1288,6 @@ namespace ARBM.CableJournalExporter.Services
             // 2. Add transition families
             // ============================================================
 
-            AddTransitionFamilies(doc);
 
             // ============================================================
             // 3. Autoconnect and split edges
@@ -1761,6 +1300,8 @@ namespace ARBM.CableJournalExporter.Services
                 AutoConnectMechanicalEquipment(graph, radiusFeet);
                 SplitEdgesByNodes(graph);
             }
+
+            AddTunnels(doc, filterParam);
 
             // ============================================================
             // 4. Attach APS controllers and APS devices
@@ -1793,30 +1334,6 @@ namespace ARBM.CableJournalExporter.Services
 
                 foreach (var loop in ctrl.Loops)
                 {
-                    var levelsInChain = GetLevelsInChain(doc, loop.Devices.Select(d => d.BaseInfo.Element as FamilyInstance).ToList());
-
-                    if (levelsInChain.Count > 0 && levelsInChain[0] != ctrlLevel)
-                        levelsInChain.Insert(0, ctrlLevel);
-                    else if (levelsInChain.Count == 0)
-                        levelsInChain.Add(ctrlLevel);
-
-                    if (levelsInChain.Count > 1)
-                    {
-                        for (int i = 0; i < levelsInChain.Count - 1; i++)
-                        {
-                            long fromLevel = levelsInChain[i];
-                            long toLevel = levelsInChain[i + 1];
-
-                            string validationError = ValidateTransitionAvailability(fromLevel, toLevel);
-                            if (validationError != null)
-                            {
-                                TaskDialog.Show("Ошибка структуры уровней", validationError);
-                                BuildError = validationError;
-                                return;
-                            }
-                        }
-                    }
-
                     FamilyInstance prevDev = ctrlFi;
                     long prevLevel = ctrlLevel;
 
@@ -1841,15 +1358,8 @@ namespace ARBM.CableJournalExporter.Services
                             doc,
                             devLevel);
 
-                        if (prevLevel != devLevel)
-                        {
-                            ConnectLevelsByTransitions(
-                                prevLevel,
-                                devLevel,
-                                prevDev,
-                                dev as FamilyInstance);
-                        }
 
+                        if (!CheckTunnel(prevLevel, devLevel, prevDev, dev as FamilyInstance)) return;
                         prevDev = dev as FamilyInstance;
                         prevLevel = devLevel;
                     }
@@ -1898,9 +1408,52 @@ namespace ARBM.CableJournalExporter.Services
         /// otherwise, only elements whose "Comments" value equals this string
         /// (case-insensitive) are included in the routing graphs.
         /// </param>
-        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "")
+        private sealed class SouyeTopology
+        {
+            public Dictionary<long, Graph> Graphs;
+            public Dictionary<string, Graph.Node> DeviceNodes;
+            public string TunnelDetails;
+
+            public SouyeTopology Copy()
+            {
+                var nodes = new Dictionary<Graph.Node, Graph.Node>();
+                var graphs = new Dictionary<long, Graph>();
+                foreach (var pair in Graphs)
+                {
+                    var graph = new Graph();
+                    graphs.Add(pair.Key, graph);
+                    foreach (var node in pair.Value.Nodes)
+                    {
+                        Graph.Node copy = graph.AddNode(node.Point);
+                        copy.IsShaftNode = node.IsShaftNode;
+                        nodes.Add(node, copy);
+                    }
+                }
+                foreach (var pair in Graphs)
+                    foreach (var edge in pair.Value.Edges)
+                        graphs[pair.Key].AddEdge(nodes[edge.A], nodes[edge.B], edge.Installation, edge.RouteElementId).Length = edge.Length;
+                return new SouyeTopology
+                {
+                    Graphs = graphs,
+                    DeviceNodes = DeviceNodes.ToDictionary(pair => pair.Key, pair => nodes[pair.Value]),
+                    TunnelDetails = TunnelDetails,
+                };
+            }
+        }
+
+        private readonly Dictionary<Func<Element, bool>, SouyeTopology> _souyeTopology =
+            new Dictionary<Func<Element, bool>, SouyeTopology>();
+
+        internal void ReuseSouyeTopologyFor(IEnumerable<Func<Element, bool>> filters)
+        {
+            _souyeTopology.Clear();
+            foreach (var filter in filters) _souyeTopology.Add(filter, null);
+        }
+
+        public void BuildGraphsByLevel(Document doc, SouyeControllerWithLoops data, string filterParam = "", Func<Element, bool> routeFilter = null)
         {
             BuildError = null;
+            TunnelError = null;
             // ============================================================
             // 0. Cache levels and reset internal structures
             // ============================================================
@@ -1908,19 +1461,37 @@ namespace ARBM.CableJournalExporter.Services
             CacheLevels(doc);
             _graphsByLevel.Clear();
             _deviceNodes.Clear();
-            _transitionNodesByLevel.Clear();
 
-            // ============================================================
-            // 1. Collect mechanical equipment (routing segments)
-            // ============================================================
+            SouyeTopology saved = null;
+            bool reusable = routeFilter != null && _souyeTopology.TryGetValue(routeFilter, out saved);
+            if (saved != null)
+            {
+                var topology = saved.Copy();
+                foreach (var pair in topology.Graphs) _graphsByLevel.Add(pair.Key, pair.Value);
+                foreach (var pair in topology.DeviceNodes) _deviceNodes.Add(pair.Key, pair.Value);
+                _tunnelDetails = topology.TunnelDetails;
+            }
+            else if (!BuildSouyeTopology(doc, filterParam, routeFilter)) return;
+            else if (reusable)
+                _souyeTopology[routeFilter] = new SouyeTopology
+                {
+                    Graphs = _graphsByLevel, DeviceNodes = _deviceNodes, TunnelDetails = _tunnelDetails,
+                }.Copy();
 
+            AttachSouyeDevices(doc, data, routeFilter != null);
+        }
+
+        private bool BuildSouyeTopology(Document doc, string filterParam, Func<Element, bool> routeFilter)
+        {
             var collector = new FilteredElementCollector(doc)
                 .OfCategory(BuiltInCategory.OST_MechanicalEquipment)
                 .WhereElementIsNotElementType();
 
             IEnumerable<Element> filteredElements = collector;
 
-            if (!string.IsNullOrEmpty(filterParam))
+            if (routeFilter != null)
+                filteredElements = filteredElements.Where(routeFilter);
+            else if (!string.IsNullOrEmpty(filterParam))
             {
                 filteredElements = collector.Where(el =>
                 {
@@ -1929,16 +1500,12 @@ namespace ARBM.CableJournalExporter.Services
                 });
             }
 
-            var allRoutes = new List<Element>();
-
             foreach (var el in filteredElements)
             {
                 var fi = el as FamilyInstance;
 
                 if (fi != null && fi.Symbol.FamilyName == TRANSITION_FAMILY_NAME)
                     continue;
-
-                allRoutes.Add(el);
 
                 if (el.Location is LocationCurve lc)
                 {
@@ -1964,15 +1531,16 @@ namespace ARBM.CableJournalExporter.Services
                 }
             }
 
-            // Validation - only if needed
-            // if (!SouyeDataValidator.ValidateRoutes(allRoutes))
-            //     return;
 
             // ============================================================
             // 2. Add transition families
             // ============================================================
 
-            AddTransitionFamilies(doc);
+            if (routeFilter != null && _graphsByLevel.Count == 0)
+            {
+                BuildError = "Не найдена геометрия трасс для расчёта КЖ СОУЭ. Проверьте корпус и «Комментарии» трасс.";
+                return false;
+            }
 
             // ============================================================
             // 3. Autoconnect and split edges
@@ -1986,10 +1554,13 @@ namespace ARBM.CableJournalExporter.Services
                 SplitEdgesByNodes(graph);
             }
 
-            // ============================================================
-            // 4. Attach Souye controller and devices
-            // ============================================================
+            AddTunnels(doc, filterParam);
 
+            return true;
+        }
+
+        private void AttachSouyeDevices(Document doc, SouyeControllerWithLoops data, bool preferWallSpeakerCenter)
+        {
             if (data == null || data.Controller == null)
                 return;
 
@@ -2024,29 +1595,7 @@ namespace ARBM.CableJournalExporter.Services
     var familyInstances = loopGroup.Devices.Select(d => d.Element as FamilyInstance)
     .Where(fi => fi != null)
     .ToList();
-var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
-                if (levelsInChain.Count > 0 && levelsInChain[0] != ctrlLevel)
-                    levelsInChain.Insert(0, ctrlLevel);
-                else if (levelsInChain.Count == 0)
-                    levelsInChain.Add(ctrlLevel);
-
-                if (levelsInChain.Count > 1)
-                {
-                    for (int i = 0; i < levelsInChain.Count - 1; i++)
-                    {
-                        long fromLevel = levelsInChain[i];
-                        long toLevel = levelsInChain[i + 1];
-
-                        string validationError = ValidateTransitionAvailability(fromLevel, toLevel);
-                        if (validationError != null)
-                        {
-                            TaskDialog.Show("Ошибка структуры уровней", validationError);
-                            BuildError = validationError;
-                            return;
-                        }
-                    }
-                }
 
                 FamilyInstance prevDev = ctrlFi as FamilyInstance;
                 long prevLevel = ctrlLevel;
@@ -2070,17 +1619,11 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         dev.Id.ToString(),
                         lpDev.Point,
                         doc,
-                        devLevel);
+                        devLevel, !preferWallSpeakerCenter || !(dev is FamilyInstance speaker)
+                            ? null : PluginForRevit2022.Core.CableWalk.WallSpeakerCenter(speaker));
 
-                    if (prevLevel != devLevel)
-                    {
-                        ConnectLevelsByTransitions(
-                            prevLevel,
-                            devLevel,
-                            prevDev,
-                            dev as FamilyInstance);
-                    }
 
+                    if (!CheckTunnel(prevLevel, devLevel, prevDev, dev as FamilyInstance)) return;
                     prevDev = dev as FamilyInstance;
                     prevLevel = devLevel;
                 }
@@ -2289,7 +1832,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
         /// The created or previously registered <see cref="Graph.Node"/> representing the device.
         /// <para>RU: Созданный или ранее зарегистрированный узел графа, соответствующий устройству.</para>
         /// </returns>
-        public Graph.Node AttachDeviceToGraphFixed(Graph graph, string key, XYZ devicePoint, Document doc, long levelId)
+        public Graph.Node AttachDeviceToGraphFixed(Graph graph, string key, XYZ devicePoint, Document doc, long levelId, XYZ preferredPoint = null)
         {
             // Получаем допуск документа для сравнения расстояний.
             // EN: Revit short-curve tolerance for distance comparisons.
@@ -2317,6 +1860,8 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
             // Переменные для поиска ближайшей проекции на рёбра графа.
             // EN: Variables for nearest projection search.
             double bestDist = double.MaxValue;
+            int bestPriority = int.MaxValue;
+            double bestRank = double.PositiveInfinity;
             XYZ bestProjection = null;
             Graph.Node bestA = null;
             Graph.Node bestB = null;
@@ -2335,6 +1880,9 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                     // EN: Extract endpoints of the edge.
                     XYZ a = edge.A.Point;
                     XYZ b = edge.B.Point;
+
+                    // Вертикальное ребро связывает только два конца шахты.
+                    if (edge.A.IsShaftNode || edge.B.IsShaftNode || Math.Abs(a.Z - b.Z) > 1e-6) continue;
 
                     // Если ребро слишком короткое — пропускаем.
                     // EN: Skip degenerate edges.
@@ -2376,8 +1924,23 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
                     // Если это лучшая (минимальная) проекция — запоминаем.
                     // EN: Update best projection if closer.
-                    if (d < bestDist)
+                    int priority = 0;
+                    double rank = d;
+                    if (preferredPoint != null)
                     {
+                        bool cable = edge.RouteElementId != 0;
+                        priority = !cable || d > 600.0 / 304.8 ? 2 : d > 300.0 / 304.8 ? 1 : 0;
+                        if (priority == 1)
+                        {
+                            var preferred = new XYZ(preferredPoint.X, preferredPoint.Y, z);
+                            double preferredT = Math.Max(0, Math.Min(1, (preferred - a).DotProduct(ab) / abLen2));
+                            rank = (a + preferredT * ab).DistanceTo(preferred);
+                        }
+                    }
+                    if (priority < bestPriority || (priority == bestPriority && rank < bestRank))
+                    {
+                        bestPriority = priority;
+                        bestRank = rank;
                         bestDist = d;
                         bestProjection = proj;
                         bestA = edge.A;
@@ -2425,7 +1988,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
             {
                 // Пропускаем сам узел устройства.
                 // EN: Skip the device node itself.
-                if (node == deviceNode)
+                if (node == deviceNode || node.IsShaftNode)
                     continue;
 
                 // Расстояние до другого узла.
@@ -2799,7 +2362,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
         private static CableInstallation ReadInstallation(Element route)
         {
-            var parameter = route.LookupParameter("УГО Вид Засечки");
+            var parameter = RevitText.FindParameter(route, "УГО Вид Засечки");
             if (parameter == null || !parameter.HasValue) return CableInstallation.Concealed;
             string name = parameter.StorageType == StorageType.ElementId
                 ? route.Document.GetElement(parameter.AsElementId())?.Name
@@ -2807,7 +2370,6 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
             return CableInstallationLengths.FromTypeName(name);
         }
 
-        internal Func<Element, bool> ApsRouteFilter { get; set; }
 
         public bool LastRouteBridged { get; private set; }
 
@@ -2816,6 +2378,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
         /// Журнал по такому графу не строится: длины пошли бы по прямой без предупреждения.
         /// </summary>
         public string BuildError { get; private set; }
+        internal string TunnelError { get; private set; }
 
         public double ComputeShortestRouteBetweenDevices(Element start, Element end, string ExpanderId = "")
         {
@@ -3031,6 +2594,12 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
 
                     if (double.IsPositiveInfinity(result))
                     {
+                        if (Math.Abs(startNode.Point.Z - endNode.Point.Z) > 1e-6)
+                        {
+                            BuildError = TunnelError = $"Нет подтверждённого межэтажного хода между устройствами ID {startKey} и {endKey}. {_tunnelDetails}";
+                            return result;
+                        }
+
                         // 1. Ищем узел, на котором оборвалась связность
                         var breakNode = graph.FindBreakNode(startNode, endNode, out var visitedStartSide);
 
@@ -3054,7 +2623,7 @@ var levelsInChain = GetLevelsInChain(doc, familyInstances);
                         // 2. Ищем лучший узел на стороне end
                         var endSideNode = graph.FindNearestToBreakOnEndSide(breakNode, endNode);
 
-                        if (endSideNode == null)
+                        if (endSideNode == null || Math.Abs(breakNode.Point.Z - endSideNode.Point.Z) > 1e-6)
                         {
                             string message =
                                 $"⚠️  Маршрут не найден!\n\n" +

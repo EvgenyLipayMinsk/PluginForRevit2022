@@ -53,52 +53,66 @@ namespace PluginForRevit2022.Core
             ("ARBM_ПСБ_БЦО", "ef58a2c7-310c-4b78-87fe-d42252e94229", new[] { D, M, C, F, N }),
             ("ARBM_ПСБ_Адрес устройства", "e43bd062-2df7-4433-a2fc-0a06f97c14aa", new[] { D, M, C, N }),
             ("ARBM_Корпус", "9b93f917-ea43-402f-9c79-eda536611406", new[] { D, M, F, E, N }),
-            ("ARBM_Номер прибора", "2f418ccc-71db-441a-ab67-321c0154782e", new[] { D, M, F }),
-            ("ARBM_Номер линии", "a5f85aa2-4c71-432a-aa66-c2f846bd7bfc", new[] { D, M, F }),
+            ("ARBM_Номер прибора", "2f418ccc-71db-441a-ab67-321c0154782e", new[] { D, M, F, E, N }),
+            ("ARBM_Номер линии", "a5f85aa2-4c71-432a-aa66-c2f846bd7bfc", new[] { D, M, F, N }),
             ("ARBM_ЗКПС", "4734826e-02fe-4762-a0e8-d4058fb36926", new[] { D, M, F }),
             ("ARBM_SP_ElementMark", "1984e5cc-9eac-455b-b4c4-51f2bb2f53a6", new[] { D, M, F, C, N }),
         };
 
+        private static readonly Dictionary<string, Guid> SharedGuidsByName = BuildSharedGuidsByName();
+
+        private static Dictionary<string, Guid> BuildSharedGuidsByName()
+        {
+            var known = Required.ToDictionary(parameter => parameter.name, parameter => new Guid(parameter.guid),
+                StringComparer.OrdinalIgnoreCase);
+            known.Add("О_Этаж", known[MarkingSettings.DefaultFloorParameter]);
+            var groupingGuid = new Guid("3de5f1a4-d560-4fa8-a74f-25d250fb3401");
+            known.Add("ADSK_Группирование", groupingGuid);
+            known.Add("О_Группирование", groupingGuid);
+            return known;
+        }
+
+        internal static bool TryGetSharedGuid(string name, out Guid guid) => SharedGuidsByName.TryGetValue(name, out guid);
+
+        internal static bool IsKnownSharedGuid(Guid guid) => SharedGuidsByName.ContainsValue(guid);
+
+        internal static bool IsStandardFloor(string name) =>
+            TryGetSharedGuid(name, out Guid guid) && guid == SharedGuidsByName[MarkingSettings.DefaultFloorParameter];
+
         public static string SharedParameterFilePath =>
             Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), SharedParameterFileName);
 
-        public static List<ParameterIssue> Check(Document doc, bool includePower = true, bool includeDefaultFloor = true)
+        public static List<ParameterIssue> Check(Document doc, bool includePower = true, bool includeDefaultFloor = true,
+            IReadOnlyDictionary<string, BuiltInCategory[]> scope = null)
         {
-            var bindings = new Dictionary<string, ElementBinding>(StringComparer.OrdinalIgnoreCase);
-            DefinitionBindingMapIterator it = doc.ParameterBindings.ForwardIterator();
-            while (it.MoveNext())
-            {
-                if (it.Current is ElementBinding binding) bindings[it.Key.Name] = binding;
-            }
-            Dictionary<string, Guid?> guids = ProjectParameterOperations.List(doc)
-                .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First().Guid, StringComparer.OrdinalIgnoreCase);
+            List<ProjectParameterInfo> parameters = ProjectParameterOperations.List(doc);
 
             var issues = new List<ParameterIssue>();
             foreach (var (name, guid, categories) in Required)
             {
                 if (!includePower && name == "ADSK_Номинальная мощность") continue;
                 if (!includeDefaultFloor && name == MarkingSettings.DefaultFloorParameter) continue;
-                var issue = new ParameterIssue { Name = name, Guid = guid, RequiredCategories = categories.ToList() };
-                if (!bindings.TryGetValue(name, out ElementBinding binding))
+                BuiltInCategory[] required = categories;
+                if (scope != null && !scope.TryGetValue(name, out required)) continue;
+                Guid expectedGuid = SharedGuidsByName[name];
+                ProjectParameterInfo existing = parameters.FirstOrDefault(parameter => parameter.Guid == expectedGuid);
+                var issue = new ParameterIssue { Name = existing?.Name ?? name, Guid = guid, RequiredCategories = required.ToList() };
+                if (existing == null)
                 {
-                    issue.Kind = "missing";
+                    issue.Kind = parameters.Any(parameter => TryGetSharedGuid(parameter.Name, out Guid namedGuid) && namedGuid == expectedGuid)
+                        ? "other_guid" : "missing";
                     issues.Add(issue);
                     continue;
                 }
-                if (guids.TryGetValue(name, out Guid? existing) && existing != new Guid(guid))
-                {
-                    issue.Kind = "other_guid";
-                    issues.Add(issue);
-                    continue;
-                }
-                if (binding is TypeBinding)
+
+                ElementBinding binding = existing.Binding;
+                if (!existing.IsInstance)
                 {
                     issue.Kind = "type_binding";
                     issues.Add(issue);
                     continue;
                 }
-                issue.MissingCategoryNames = categories
+                issue.MissingCategoryNames = required
                     .Select(c => Category.GetCategory(doc, c))
                     .Where(c => c != null && !binding.Categories.Contains(c))
                     .Select(c => c.Name).ToList();

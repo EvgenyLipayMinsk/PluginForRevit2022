@@ -40,7 +40,7 @@ namespace PluginForRevit2022.Core
                 long electrical = (long)BuiltInCategory.OST_ElectricalEquipment, routes = (long)BuiltInCategory.OST_MechanicalEquipment;
                 devices = new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
                     .Where(d => d.Category != null && RevitIds.IdOf(d.Category.Id) != electrical && RevitIds.IdOf(d.Category.Id) != routes &&
-                                d.Location is LocationPoint && d.LookupParameter(Param) != null &&
+                                d.Location is LocationPoint && RevitText.FindParameter(d, Param) != null &&
                                 (d.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)?.AsString() ?? "").IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
                     .ToList();
             }
@@ -56,7 +56,7 @@ namespace PluginForRevit2022.Core
             // Семейства без ЗКПС (изоляторы, ИПР — галочка «ЗКПС» в настройках маркировки): не заполняются, прежнее значение очищается
             List<FamilyInstance> noZkps = devices.Where(d => !zkpsSettings.GetsZkps(d.Symbol.FamilyName)).ToList();
             devices = devices.Except(noZkps).ToList();
-            List<FamilyInstance> noZkpsToClear = noZkps.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).ToList();
+            List<FamilyInstance> noZkpsToClear = noZkps.Where(d => !string.IsNullOrEmpty(RevitText.FindParameter(d, Param)?.AsString())).ToList();
 
             var changes = new List<(FamilyInstance device, string value, string zone)>();
             var report = new List<Dictionary<string, object>>();
@@ -179,7 +179,7 @@ namespace PluginForRevit2022.Core
             List<FamilyInstance> outsideDevices = devices.Where(d =>
                 !assigned.Contains(RevitIds.IdOf(d.Id)) && !inOpenZone.Contains(RevitIds.IdOf(d.Id)) &&
                 processedLevels.Contains(RevitIds.IdOf(LevelOf(d)))).ToList();
-            List<FamilyInstance> toClear = outsideDevices.Where(d => !string.IsNullOrEmpty(d.LookupParameter(Param)?.AsString())).Concat(noZkpsToClear).ToList();
+            List<FamilyInstance> toClear = outsideDevices.Where(d => !string.IsNullOrEmpty(RevitText.FindParameter(d, Param)?.AsString())).Concat(noZkpsToClear).ToList();
 
             int changed = 0, cleared = 0;
             var failures = new List<string>();
@@ -190,7 +190,7 @@ namespace PluginForRevit2022.Core
                     transaction.Start();
                     foreach (var (device, value, _) in changes)
                     {
-                        if (device.LookupParameter(Param)?.AsString() == value) continue;
+                        if (RevitText.FindParameter(device, Param)?.AsString() == value) continue;
                         string error = RevitText.TrySet(device, Param, value);
                         if (error != null) failures.Add($"id {RevitIds.IdOf(device.Id)}: {error}");
                         else changed++;

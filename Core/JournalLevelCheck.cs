@@ -116,15 +116,13 @@ namespace PluginForRevit2022.Core
         /// <summary>Как журнал: параметр этажа (цифра) → уровень с этим номером или по высоте; основа-уровень, уровень основы, «Уровень», иначе −1.</summary>
         private static long CableLevel(FamilyInstance cable, string floorParameter)
         {
-            string floor = Read(cable, floorParameter);
-            if (int.TryParse(floor, out int number))
+            Level configured = CableWalk.ConfiguredLevel(cable, floorParameter, CableWalk.ProjectLevels(cable.Document));
+            if (configured != null) return RevitIds.IdOf(configured.Id);
+            if (int.TryParse(Read(cable, floorParameter), out _))
             {
-                List<Level> all = new FilteredElementCollector(cable.Document).OfClass(typeof(Level)).Cast<Level>().ToList();
-                Level byNumber = all.FirstOrDefault(l => { var m = Regex.Match(l.Name ?? "", @"-?\d+"); return m.Success && int.Parse(m.Value) == number; });
-                if (byNumber != null) return RevitIds.IdOf(byNumber.Id);
                 XYZ point = cable.Location is LocationPoint lp ? lp.Point
                     : cable.Location is LocationCurve lc ? (lc.Curve.GetEndPoint(0) + lc.Curve.GetEndPoint(1)) / 2 : null;
-                Level byHeight = point == null ? null : all.Where(l => l.ProjectElevation <= point.Z + 50 / 304.8).OrderByDescending(l => l.ProjectElevation).FirstOrDefault();
+                Level byHeight = point == null ? null : CableWalk.LevelByZ(cable.Document, point);
                 if (byHeight != null) return RevitIds.IdOf(byHeight.Id);
             }
             Element host = cable.Host;
@@ -137,9 +135,7 @@ namespace PluginForRevit2022.Core
         /// <summary>Как журнал: параметр этажа как имя уровня, основа, «Уровень спецификации», ближайший по Elevation.</summary>
         private static long DeviceLevel(Document doc, FamilyInstance device, List<Level> levels, string floorParameter)
         {
-            string floor = Read(device, floorParameter);
-            Level byName = string.IsNullOrEmpty(floor) ? null : levels.FirstOrDefault(l => l.Name.Equals(floor, StringComparison.OrdinalIgnoreCase));
-            if (byName != null) return RevitIds.IdOf(byName.Id);
+
             long host = CableLevel(device, floorParameter);
             if (host != -1) return host;
             ElementId schedule = device.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM)?.AsElementId();
@@ -151,7 +147,7 @@ namespace PluginForRevit2022.Core
 
         private static string LineOf(Element element)
         {
-            string value = element.LookupParameter(DeviceMarkingOperations.ParamGrouping)?.AsString();
+            string value = DeviceMarkingOperations.ReadGrouping(element);
             if (string.IsNullOrWhiteSpace(value)) return null;
             string[] parts = value.Split('.');
             if (parts.Length < 3) return null;
@@ -167,6 +163,6 @@ namespace PluginForRevit2022.Core
             return Math.Sqrt(x * x + y * y);
         }
 
-        private static string Read(Element element, string name) => element.LookupParameter(name)?.AsString()?.Trim() ?? "";
+        private static string Read(Element element, string name) => RevitText.FindParameter(element, name)?.AsString()?.Trim() ?? "";
     }
 }

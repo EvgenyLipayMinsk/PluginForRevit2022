@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
@@ -22,7 +22,7 @@ namespace PluginForRevit2022.Mcp
             Register("ping", Ping);
             Register("check_cable_routes", (app, args) => CableDiagnosticsOperations.Routes(ActiveProject(app), args));
             Register("explain_cable_length", (app, args) => JournalReviewOperations.Explain(ActiveProject(app), args));
-            Register("manage_clash_report", (app, args) => ClashReportFileOperations.Manage(app.Application.Username, args));
+            Register("manage_clash_report", (app, args) => ClashReportFileOperations.Manage(app.ActiveUIDocument?.Document, app.Application.Username, args));
             Register("capture_clash_view", (app, args) => ClashViewCaptureOperations.Capture(app, args));
             Register("compare_clash_reports", (app, args) => ClashReportFileOperations.Compare(args));
             Register("check_line_consistency", (app, args) => CableDiagnosticsOperations.Lines(ActiveProject(app), args));
@@ -119,7 +119,12 @@ namespace PluginForRevit2022.Mcp
             {
                 System = args.String("system"),
                 Comments = args.String("comments"),
+                ApsLineKey = args.String("apsLineKey"),
+                PreviewConnectionOrder = args.Bool("previewConnectionOrder") ?? false,
+                ConnectionOrder = args.StringList("connectionOrder"),
+                AcceptFallbackLengths = args.Bool("acceptFallbackLengths") ?? false,
                 ParameterStandard = args.String("parameterStandard"),
+                ControllerElementId = args.Long("controllerElementId"),
                 Form = args.String("form"),
                 TemplatePath = args.String("templatePath"),
                 SavePath = args.String("savePath"),
@@ -509,7 +514,8 @@ namespace PluginForRevit2022.Mcp
             double? aps = args.Double("apsPercent"), security = args.Double("securityPercent"),
                 souye = args.Double("souyePercent"), line = args.Double("lineReserveM");
             string floor = args.String("floorParameter");
-            if (aps == null && security == null && souye == null && line == null && string.IsNullOrWhiteSpace(floor)) return null;
+            bool? zones = args.Bool("souyeFunctionalZones");
+            if (aps == null && security == null && souye == null && line == null && string.IsNullOrWhiteSpace(floor) && zones == null) return null;
             JournalSettings current = MarkingSettings.CurrentJournal();
             return new JournalSettings
             {
@@ -518,6 +524,7 @@ namespace PluginForRevit2022.Mcp
                 SouyePercent = souye ?? current.SouyePercent,
                 LineReserveM = line ?? current.LineReserveM,
                 FloorParameter = string.IsNullOrWhiteSpace(floor) ? current.FloorParameter : floor.Trim(),
+                SouyeFunctionalZones = zones ?? current.SouyeFunctionalZones,
             };
         }
 

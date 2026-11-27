@@ -148,12 +148,12 @@ namespace PluginForRevit2022.Core
         private static Parameter Find(Element element, string name, out bool isType)
         {
             isType = false;
-            Parameter p = element.LookupParameter(name);
+            Parameter p = RevitText.FindParameter(element, name);
             if (p != null) return p;
             ElementId typeId = element.GetTypeId();
             if (typeId != ElementId.InvalidElementId && element.Document.GetElement(typeId) is Element type)
             {
-                p = type.LookupParameter(name);
+                p = RevitText.FindParameter(type, name);
                 isType = p != null;
             }
             return p;

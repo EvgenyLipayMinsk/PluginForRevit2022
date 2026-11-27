@@ -3,7 +3,9 @@ using ARBM.CableJournalExporter.Services;
 using ARBM.CableJournalExporter.Systems.Souye.Models;
 using Autodesk.Revit.DB;
 using System;
+using PluginForRevit2022.Core;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ARBM.CableJournalExporter.Systems.Souye
 {
@@ -16,6 +18,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
     {
         /// <summary>Номер шлейфа.</summary>
         public int LoopAddress { get; set; }
+        public int? DeviceNumber { get; set; }
 
         /// <summary>Количество оповещателей в шлейфе.</summary>
         public int DeviceCount { get; set; }
@@ -147,6 +150,24 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// <see cref="SouyeBuildResult.Success"/> со списком записей, или
         /// <see cref="SouyeBuildResult.Failure"/> с сообщением о превышении сечения.
         /// </returns>
+        public SouyeBuildResult Build(IReadOnlyList<SouyeControllerWithLoops> groups, CancellationMonitor cancel = null)
+        {
+            var records = new List<CableRecord>();
+            var summaries = new List<SouyeLoopSummary>();
+            foreach (var group in groups)
+            {
+                var result = Build(group, group.Controller.CommentsValue, cancel);
+                if (!result.IsSuccess)
+                {
+                    string label = group.Controller.RackNumber.HasValue ? $"Прибор {group.Controller.RackNumber}: " : "";
+                    return SouyeBuildResult.Failure(label + result.ErrorMessage);
+                }
+                records.AddRange(result.Records);
+                summaries.AddRange(result.LoopSummaries);
+            }
+            return SouyeBuildResult.Success(records, summaries);
+        }
+
         public SouyeBuildResult Build(SouyeControllerWithLoops data, string param = "", CancellationMonitor cancel = null)
         {
             var records = new List<CableRecord>();
@@ -155,25 +176,37 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             // Save current monitor for inner calls
             _currentCancel = cancel;
 
-            // Строим графы по уровням один раз
-            cancel?.SetCurrentOperation("RouteLengthCalculator.BuildGraphsByLevel");
-            if (cancel?.IsCancellationRequested == true)
-                throw new OperationCanceledException("Cancelled before building graphs.");
+            bool Scoped(SouyeLoopGroup group) => data.Controller.RackNumber.HasValue && group.Devices.Exists(device => !device.UsesLegacyNumber);
+            string Comment(SouyeLoopGroup group) => DeviceMarkingOperations.CommentOf(group.Devices[0].Element).ToUpperInvariant();
 
-            // Delegate graph construction (uses LoggedRouteLengthCalculator which supports a cancellation-aware API)
-            _routeCalculator.BuildGraphsByLevel(_doc, data, param, cancel);
+            var scopes = data.LoopGroups.Where(Scoped).GroupBy(group => (zones: group.FunctionalZones, comment: Comment(group))).ToList();
+            var filters = scopes.ToDictionary(scope => scope.Key,
+                scope => SouyeLineIdentity.RouteScope(_doc, scope.Key.zones ? null : data.Controller.HousingBlock,
+                    data.Controller.RackNumber.Value, scope.Key.comment, scope.Key.zones));
+            _routeCalculator.Inner.ReuseSouyeTopologyFor(scopes.Where(scope => scope.Count() > 1).Select(scope => filters[scope.Key]));
 
-            // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
-            if (_routeCalculator.BuildError != null)
-                return SouyeBuildResult.Failure($"Граф трасс не построен: {_routeCalculator.BuildError}. Журнал не сформирован.");
-
-            cancel?.ClearCurrentOperation();
-
+            bool legacyGraph = false;
             foreach (var loopGroup in data.LoopGroups)
             {
                 if (cancel?.IsCancellationRequested == true)
                     throw new OperationCanceledException("Cancelled during building records.");
 
+                bool scoped = Scoped(loopGroup);
+                if (scoped || !legacyGraph)
+                {
+                    var routeData = new SouyeControllerWithLoops
+                    {
+                        Controller = data.Controller,
+                        LoopGroups = scoped ? new List<SouyeLoopGroup> { loopGroup }
+                            : data.LoopGroups.FindAll(group => group.Devices.TrueForAll(device => device.UsesLegacyNumber)),
+                    };
+                    string comment = scoped ? Comment(loopGroup) : param;
+                    Func<Element, bool> filter = scoped ? filters[(loopGroup.FunctionalZones, comment)] : null;
+                    _routeCalculator.BuildGraphsByLevel(_doc, routeData, comment, cancel, filter);
+                    if (_routeCalculator.BuildError != null)
+                        throw new SouyeRouteLayoutException($"Стойка «{data.Controller.ProductName}», линия {loopGroup.LoopAddress}. {_routeCalculator.BuildError}");
+                    legacyGraph = !scoped;
+                }
                 var loopResult = BuildLoopRecords(data.Controller, loopGroup, _doc, cancel);
                 if (!loopResult.IsSuccess)
                     return SouyeBuildResult.Failure(loopResult.ErrorMessage);
@@ -188,6 +221,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 loopSummaries.Add(new SouyeLoopSummary
                 {
                     LoopAddress = loopGroup.LoopAddress,
+                    DeviceNumber = data.Controller.RackNumber,
                     DeviceCount = loopGroup.Devices.Count,
                     TotalPower = loopGroup.TotalPower,
                     TotalLength = loopSummary?.TotalLength ?? 0,
@@ -329,9 +363,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// </summary>
         private static string FormatControllerPoint(SouyeControllerInfo controller)
         {
-            return !string.IsNullOrWhiteSpace(controller.HousingBlock)
+            string name = !string.IsNullOrWhiteSpace(controller.HousingBlock)
                 ? $"{controller.HousingBlock}.{controller.ProductName}"
                 : controller.ProductName;
+            return controller.RackContainsSeveralDevices ? $"{name} / прибор {controller.RackNumber}" : name;
         }
 
         /// <summary>
@@ -339,9 +374,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// </summary>
         private static string FormatDevicePoint(SouyeDeviceInfo device)
         {
-            return !string.IsNullOrWhiteSpace(device.HousingBlock)
-                ? $"{device.HousingBlock}.{device.Bco}.{device.LoopAddressRaw}.{device.ElementMarkRaw}"
-                : $"{device.Bco}.{device.LoopAddressRaw}.{device.ElementMarkRaw}";
+            string prefix = string.IsNullOrWhiteSpace(device.HousingBlock) ? "" : device.HousingBlock + ".";
+            if (device.RackNumber.HasValue)
+                return $"{prefix}{device.Bco}.{device.RackNumber}.{device.LoopAddressParsed}.{device.ElementMarkParsed}";
+            return $"{prefix}{device.Bco}.{device.LoopAddressRaw}.{device.ElementMarkRaw}";
         }
 
         // ─── Расчёт длины ─────────────────────────────────────────────────────────
@@ -396,6 +432,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                     throw new OperationCanceledException("Cancelled after route computation.");
 
                 // Если маршрут не найден (бесконечность), используем fallback-логику
+                if (_routeCalculator.Inner.TunnelError != null) throw new SouyeRouteLayoutException(_routeCalculator.Inner.TunnelError);
                 if (double.IsInfinity(lengthFeet))
                 {
                     result.IsFallbackForLength = true;

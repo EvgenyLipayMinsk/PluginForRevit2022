@@ -18,6 +18,7 @@ namespace PluginForRevit2022
     {
         private bool _selected;
         internal ElementId Id;
+        internal Guid? SharedGuid;
         public string Name { get; set; }
         public string Kind { get; set; }
         public string Categories { get; set; }
@@ -65,14 +66,18 @@ namespace PluginForRevit2022
         };
         private readonly TextBlock _counter = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.DimGray };
         private readonly Button _delete;
+        private bool _batchingSelection;
 
         public UserRemoveParameters(List<Element> elements, Document doc)
         {
             InitializeComponent();
+            UI.AerBimAppearance.Apply(this);
+            System.Windows.Automation.AutomationProperties.SetName(_search, "Поиск параметров");
+            System.Windows.Automation.AutomationProperties.SetName(_kind, "Вид параметра");
             _doc = doc;
             _rows = elements.OfType<ParameterElement>().Select(RowOf)
                 .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-            foreach (ParameterRow r in _rows) r.PropertyChanged += (s, e) => UpdateCounter();
+            foreach (ParameterRow r in _rows) r.PropertyChanged += (s, e) => { if (!_batchingSelection) UpdateCounter(); };
 
             // Таблица: галочка, имя, вид, категории привязки
             // Галочка срабатывает с первого клика (у DataGridCheckBoxColumn первый клик только выделяет строку)
@@ -81,6 +86,7 @@ namespace PluginForRevit2022
                 new Binding(nameof(ParameterRow.Selected)) { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
             box.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
             box.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
+            box.SetBinding(System.Windows.Automation.AutomationProperties.NameProperty, new Binding(nameof(ParameterRow.Name)));
             _table.Columns.Add(new DataGridTemplateColumn { CellTemplate = new DataTemplate { VisualTree = box }, Width = 36 });
             _table.Columns.Add(new DataGridTextColumn { Header = "Параметр", Binding = new Binding(nameof(ParameterRow.Name)), IsReadOnly = true, Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
             _table.Columns.Add(new DataGridTextColumn { Header = "Вид", Binding = new Binding(nameof(ParameterRow.Kind)), IsReadOnly = true, Width = 140 });
@@ -94,7 +100,7 @@ namespace PluginForRevit2022
                 if (e.Key != System.Windows.Input.Key.Space || _table.SelectedItems.Count == 0) return;
                 List<ParameterRow> picked = _table.SelectedItems.OfType<ParameterRow>().ToList();
                 bool value = !picked.All(r => r.Selected);
-                foreach (ParameterRow r in picked) r.Selected = value;
+                SetChecked(picked, value);
                 e.Handled = true;
             };
 
@@ -106,10 +112,11 @@ namespace PluginForRevit2022
             {
                 _searchHint.Visibility = _search.Text.Length == 0 ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
                 _view.Refresh();
+                UpdateCounter();
             };
             foreach (string k in new[] { "Все виды" }.Concat(_rows.Select(r => r.Kind).Distinct().OrderBy(k => k))) _kind.Items.Add(k);
             _kind.SelectedIndex = 0;
-            _kind.SelectionChanged += (s, e) => _view.Refresh();
+            _kind.SelectionChanged += (s, e) => { _view.Refresh(); UpdateCounter(); };
             var top = new DockPanel();
             DockPanel.SetDock(_kind, Dock.Right);
             top.Children.Add(_kind);
@@ -128,8 +135,8 @@ namespace PluginForRevit2022
             Button close = Btn("Закрыть", Close);
             close.IsCancel = true;
             var left = new StackPanel { Orientation = Orientation.Horizontal };
-            left.Children.Add(Btn("Отметить найденные", () => SetVisible(true), new Thickness(0, 0, 8, 0)));
-            left.Children.Add(Btn("Снять отметки", () => { foreach (ParameterRow r in _rows) r.Selected = false; }, new Thickness(0, 0, 12, 0)));
+            left.Children.Add(Btn("Отметить найденные", () => SetChecked(_view.Cast<ParameterRow>(), true), new Thickness(0, 0, 8, 0)));
+            left.Children.Add(Btn("Снять отметки", () => SetChecked(_rows, false), new Thickness(0, 0, 12, 0)));
             left.Children.Add(_counter);
             var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             right.Children.Add(_delete);
@@ -170,7 +177,7 @@ namespace PluginForRevit2022
                 }
             }
             catch (Exception) { /* параметр без привязки — категорий нет */ }
-            return new ParameterRow { Id = p.Id, Name = p.Name, Kind = kind, Categories = categories };
+            return new ParameterRow { Id = p.Id, SharedGuid = (p as SharedParameterElement)?.GuidValue, Name = p.Name, Kind = kind, Categories = categories };
         }
 
         private bool Visible(ParameterRow r)
@@ -182,15 +189,27 @@ namespace PluginForRevit2022
             return byText && byKind;
         }
 
-        private void SetVisible(bool value)
+        private void SetChecked(IEnumerable<ParameterRow> rows, bool value)
         {
-            foreach (ParameterRow r in _view.Cast<ParameterRow>()) r.Selected = value;
+            _batchingSelection = true;
+            try
+            {
+                foreach (ParameterRow row in rows) row.Selected = value;
+            }
+            finally
+            {
+                _batchingSelection = false;
+                UpdateCounter();
+            }
         }
+
+        private int HiddenCheckedCount() => _rows.Count(row => row.Selected && !Visible(row));
 
         private void UpdateCounter()
         {
             int selected = _rows.Count(r => r.Selected);
-            _counter.Text = $"Отмечено: {selected} из {_rows.Count}";
+            int hidden = HiddenCheckedCount();
+            _counter.Text = hidden > 0 ? $"Отмечено: {selected} (скрыто: {hidden})" : $"Отмечено: {selected}";
             if (_delete != null)
             {
                 _delete.IsEnabled = selected > 0;
@@ -219,12 +238,17 @@ namespace PluginForRevit2022
             catch (Exception) { /* проверка не удалась — предупредим при самом удалении */ }
 
             // Параметры, на которых держатся маркировка и кабельный журнал
-            List<string> plugin = picked.Where(r => r.Name.StartsWith("ARBM_", StringComparison.OrdinalIgnoreCase) || r.Name.StartsWith("ADSK_", StringComparison.OrdinalIgnoreCase))
-                .Select(r => r.Name).ToList();
-            string warnings = (extra > 0 ? $"\n\nВместе с ними Revit удалит связанных элементов: {extra} (например правила фильтров видов)." : "")
-                + (plugin.Count > 0 ? $"\n\nВнимание: {string.Join(", ", plugin.Take(6))}{(plugin.Count > 6 ? " …" : "")} нужны маркировке и кабельному журналу — без них они работать не будут." : "");
+            string floor = Core.MarkingSettings.CurrentFloorParameter();
+            List<string> plugin = picked.Where(row =>
+                (row.SharedGuid.HasValue && Core.PluginParameterCheck.IsKnownSharedGuid(row.SharedGuid.Value)) ||
+                string.Equals(row.Name, floor, StringComparison.OrdinalIgnoreCase))
+                .Select(row => row.Name).ToList();
+            int hidden = HiddenCheckedCount();
+            string warnings = (hidden > 0 ? $"\n\nСкрыто фильтром: {hidden}. Эти отмеченные параметры тоже будут удалены." : "")
+                + (extra > 0 ? $"\n\nВместе с параметрами Revit удалит связанных элементов: {extra}." : "")
+                + (plugin.Count > 0 ? $"\n\nКоманды AerBIM используют: {string.Join(", ", plugin.Take(6))}{(plugin.Count > 6 ? " …" : "")}." : "");
             if (MessageBox.Show(this, $"Удалить параметры: {picked.Count}?\n\n{names}{warnings}\n\nЗначения этих параметров во всех элементах будут потеряны. Отменить можно через Ctrl+Z в Revit.",
-                    Title, MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    Title, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
                 return;
 
             try

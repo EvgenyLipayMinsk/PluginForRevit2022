@@ -132,6 +132,7 @@ namespace PluginForRevit2022
 
         public LinePickerWindow(string title, List<LineInfo> lines, bool offerStart)
         {
+            UI.AerBimAppearance.Apply(this);
             Title = title + " — выбор линии";
             Width = 620;
             Height = 380;
@@ -155,6 +156,7 @@ namespace PluginForRevit2022
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
             Button ok = Action("Указать на плане", Accept);
             ok.IsDefault = true;
+            UI.AerBimAppearance.Primary(this, ok);
             buttons.Children.Add(ok);
 
             var bottom = new StackPanel();

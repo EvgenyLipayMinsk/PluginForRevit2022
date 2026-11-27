@@ -6,6 +6,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
+using PluginForRevit2022.Core;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -72,19 +73,6 @@ namespace ARBM.CableJournalExporter.Commands
                 }, null, timeout, Timeout.InfiniteTimeSpan);
 
                 // =================================================================
-                // БЛОК 1️⃣: Информирование пользователя о требованиях к выбору
-                // BLOCK 1️⃣: Inform user about selection requirements
-                // =================================================================
-
-                TaskDialog.Show(
-                    "Выбор оборудования СОУЭ",
-                    "Выберите оборудование, входящее в состав СОУЭ.\n\n" +
-                    "Допустимые категории:\n" +
-                    "• Электрооборудование (OST_ElectricalEquipment) — контроллер СОУЭ\n\n" +
-                    "• Устройства выбора и оповещения (OST_NurseCallDevices) — оповещатели и иные элементы СОУЭ\n\n" +
-                     "Элемент должен содержать заполненный параметр «Comments».");
-
-                // =================================================================
                 // БЛОК 2️⃣: Выбор контроллера СОУЭ пользователем
                 // BLOCK 2️⃣: Select SOUYÉ controller by user
                 // =================================================================
@@ -102,7 +90,7 @@ namespace ARBM.CableJournalExporter.Commands
                     var reference = uiDoc.Selection.PickObject(
                         ObjectType.Element,
                         filter,
-                        "Выберите любой элемент, входящий в  СОУЭ (с заполненным Comments)");
+                        "Выберите стойку СОУЭ или размеченный оповещатель");
 
                     if (reference == null)
                         return Result.Cancelled;
@@ -228,7 +216,7 @@ namespace ARBM.CableJournalExporter.Commands
                 var parser = new SouyeElementParser(parameterMapper);
                 var collector = new SouyeDataCollector(parser);
                 // SouyeControllerWithLoops Data from collectResult
-                var collectResult = collector.Collect(doc, commentsValue_Final);
+                var collectResult = collector.Collect(doc, commentsValue_Final, controllerElement);
                 cancelMonitor.ClearCurrentOperation();
 
                 if (cancelMonitor.IsCancellationRequested)
@@ -249,14 +237,14 @@ namespace ARBM.CableJournalExporter.Commands
                     return Result.Failed;
                 }
 
-                var data = collectResult.Data;
+                var groups = collectResult.Groups;
 
                 ExecutionLogger.Log(
                     "ExportSouyeCableJournalCommand",
                     "data_collected",
                     counts: new Dictionary<string, object>
                     {
-                        { "loopGroups", data.LoopGroups?.Count ?? 0 }
+                        { "loopGroups", groups.Sum(group => group.LoopGroups.Count) }
                     });
 
                 // =================================================================
@@ -265,7 +253,7 @@ namespace ARBM.CableJournalExporter.Commands
                 // =================================================================
 
                 var validator = new SouyeDataValidator(parameterMapper);
-                var errors = validator.Validate(data);
+                var errors = validator.ValidateGroups(groups);
 
                 if (errors.Count > 0)
                 {
@@ -291,7 +279,12 @@ namespace ARBM.CableJournalExporter.Commands
                 SouyeBuildResult buildResult = null;
                 try
                 {
-                    buildResult = builder.Build(data, commentsValue_Final, cancelMonitor);
+                    buildResult = builder.Build(groups, cancelMonitor);
+                }
+                catch (SouyeRouteLayoutException ex)
+                {
+                    TaskDialog.Show(SouyeRouteLayoutException.DialogTitle, ex.Message);
+                    return Result.Failed;
                 }
                 catch (OperationCanceledException)
                 {
@@ -476,7 +469,7 @@ namespace ARBM.CableJournalExporter.Commands
 
                 dataRows.Add(new[]
                 {
-                    $"{prefixes[0]}{summary.LoopAddress}",
+                    summary.DeviceNumber.HasValue ? $"Пр.{summary.DeviceNumber} {prefixes[0]}{summary.LoopAddress}" : $"{prefixes[0]}{summary.LoopAddress}",
                     $"{prefixes[1]}{summary.DeviceCount}",
                     $"{prefixes[2]}{powerStr}",
                     $"{prefixes[3]}{lengthInt}м",

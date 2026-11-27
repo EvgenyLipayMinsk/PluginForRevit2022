@@ -1,4 +1,5 @@
-﻿using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
+﻿using PluginForRevit2022.Core;
+using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
 using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
 using ARBM.CableJournalExporter.Systems.Security.Models;
@@ -25,7 +26,7 @@ namespace ARBM.CableJournalExporter.Services
         /// <summary>Все параметры прибора заполнены; иначе — в отчёт о пропущенных (в режиме «все системы» — только частично заполненные).</summary>
         private bool Complete(FamilyInstance d, bool reportIfPartial)
         {
-            var empty = _deviceParams.Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
+            var empty = _deviceParams.Where(p => string.IsNullOrWhiteSpace(RevitText.FindParameter(d, p)?.AsString())).ToList();
             if (empty.Count == 0) return true;
             // «все системы»: в отчёт — только приборы с адресом, БЦО или номером (этаж заполнен у всего подряд)
             if (!reportIfPartial || empty.Count < _deviceParams.Length - (empty.Contains(_parser.FloorParameter) ? 0 : 1))
@@ -54,7 +55,7 @@ namespace ARBM.CableJournalExporter.Services
                 .WhereElementIsNotElementType()
                 .OfType<FamilyInstance>()
                 .Where(x => x.SuperComponent == null) // вложенные семейства — часть родителя
-                .Where(c => (c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString() ?? "").Trim().StartsWith("ARK.", StringComparison.OrdinalIgnoreCase)) // АПС — «M2.ARK.3», не СОТС
+                .Where(c => (RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString() ?? "").Trim().StartsWith("ARK.", StringComparison.OrdinalIgnoreCase)) // АПС — «M2.ARK.3», не СОТС
                 .ToList();
 
             if (!allControllers.Any())
@@ -64,8 +65,8 @@ namespace ARBM.CableJournalExporter.Services
             var controllersWithEmptyParams = allControllers
                 .Where(c =>
                 {
-                    string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(c, _parser.FloorParameter)?.AsString();
 
                     // Если есть хотя бы один пустой параметр
                     return string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(floor);
@@ -78,8 +79,8 @@ namespace ARBM.CableJournalExporter.Services
                 
                 foreach (var ctrl in controllersWithEmptyParams)
                 {
-                    string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(ctrl, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(ctrl, _parser.FloorParameter)?.AsString();
 
                     errorMessage += $"ID: {ctrl.Id}\n";
                     
@@ -102,8 +103,8 @@ namespace ARBM.CableJournalExporter.Services
             var controllers = allControllers
                 .Where(c =>
                 {
-                    string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(c, _parser.FloorParameter)?.AsString();
 
                     return !string.IsNullOrWhiteSpace(name)
                            && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0
@@ -172,8 +173,8 @@ namespace ARBM.CableJournalExporter.Services
                         LoopNumber = g.Key,
                         Devices = g.Select(x => x.Device)
                             // Номер в шлейфе — число: 1, 2, …, 10 (по строке было бы 1, 10, 11, 2).
-                            .OrderBy(d => int.TryParse(d.LookupParameter("ARBM_SP_ElementMark")?.AsString()?.Trim(), out int n) ? n : int.MaxValue)
-                            .ThenBy(d => d.LookupParameter("ARBM_SP_ElementMark")?.AsString())
+                            .OrderBy(d => int.TryParse(RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString()?.Trim(), out int n) ? n : int.MaxValue)
+                            .ThenBy(d => RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString())
                             .ToList()
                     })
                     .ToList();
@@ -223,7 +224,7 @@ namespace ARBM.CableJournalExporter.Services
             // ✅ ВАЛИДАЦИЯ: проверка наличия петель у контроллеров
             var matchedNumbers = new HashSet<int>(result.Select(c => c.ControllerId.ControllerNumber));
             foreach (var x in parsedDevices.Where(x => !matchedNumbers.Contains(x.Address.ControllerNumber)))
-                _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{x.Device.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
+                _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{RevitText.FindParameter(x.Device, "ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
             ReportSkipped();
 
             if (!SecurityDataValidator.ValidateControllers(controllers, result, _parser.FloorParameter))
@@ -260,8 +261,8 @@ namespace ARBM.CableJournalExporter.Services
             var controllersWithEmptyParams = allControllers
                 .Where(c =>
                 {
-                    string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(c, _parser.FloorParameter)?.AsString();
 
                     // Если есть хотя бы один пустой параметр
                     return string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(floor);
@@ -274,8 +275,8 @@ namespace ARBM.CableJournalExporter.Services
                 
                 foreach (var ctrl in controllersWithEmptyParams)
                 {
-                    string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(ctrl, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(ctrl, _parser.FloorParameter)?.AsString();
 
                     errorMessage += $"ID: {ctrl.Id}\n";
                     
@@ -298,8 +299,8 @@ namespace ARBM.CableJournalExporter.Services
             var controllers = allControllers
                 .Where(c =>
                 {
-                    string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                    string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
+                    string name = RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString();
+                    string floor = RevitText.FindParameter(c, _parser.FloorParameter)?.AsString();
 
                     return !string.IsNullOrWhiteSpace(name)
                            && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0
@@ -375,8 +376,8 @@ namespace ARBM.CableJournalExporter.Services
                         LoopNumber = g.Key,
                         Devices = g.Select(x => x.Device)
                             // Номер в шлейфе — число: 1, 2, …, 10 (по строке было бы 1, 10, 11, 2).
-                            .OrderBy(d => int.TryParse(d.LookupParameter("ARBM_SP_ElementMark")?.AsString()?.Trim(), out int n) ? n : int.MaxValue)
-                            .ThenBy(d => d.LookupParameter("ARBM_SP_ElementMark")?.AsString())
+                            .OrderBy(d => int.TryParse(RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString()?.Trim(), out int n) ? n : int.MaxValue)
+                            .ThenBy(d => RevitText.FindParameter(d, "ARBM_SP_ElementMark")?.AsString())
                             .ToList()
                     })
                     .ToList();
@@ -426,7 +427,7 @@ namespace ARBM.CableJournalExporter.Services
             // ✅ ВАЛИДАЦИЯ: проверка наличия петель у контроллеров
             var matchedNumbers = new HashSet<int>(result.Select(c => c.ControllerId.ControllerNumber));
             foreach (var x in parsedDevices.Where(x => !matchedNumbers.Contains(x.Address.ControllerNumber)))
-                _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{x.Device.LookupParameter("ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
+                _skipped.Add($"прибор id {x.Device.Id}: нет контроллера с номером {x.Address.ControllerNumber} (адрес «{RevitText.FindParameter(x.Device, "ARBM_ПСБ_Адрес устройства")?.AsString()}»)");
             ReportSkipped();
 
             if (!SecurityDataValidator.ValidateControllers(controllers, result, _parser.FloorParameter))

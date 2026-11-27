@@ -1,4 +1,5 @@
-﻿using ARBM.CableJournalExporter.Models;
+using PluginForRevit2022.Core;
+using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using Autodesk.Revit.DB;
@@ -47,6 +48,7 @@ namespace ARBM.CableJournalExporter.Services
             _routeCalc.BuildGraphsByLevel(_doc, controllers, param);
 
             // Граф не построен (ошибка уровней, переходов или трасс — окно показано): журнал не строится.
+            if (_routeCalc.TunnelError != null) throw new CableWalk.TunnelException(_routeCalc.TunnelError);
             if (_routeCalc.BuildError != null) return result;
             // _graphsByLevel = _routeCalc._graphsByLevel;
             //  _levelsById = _routeCalc.LevelsById;
@@ -323,6 +325,7 @@ namespace ARBM.CableJournalExporter.Services
                     : _routeCalc.ComputeShortestRouteBetweenDevices(start, end, (string)null);
 
                 // Если путь не найден — fallback
+                if (_routeCalc.TunnelError != null) throw new CableWalk.TunnelException(_routeCalc.TunnelError);
                 if (double.IsInfinity(feet))
                 {
                     isFallbackForLength = true;

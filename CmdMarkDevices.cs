@@ -9,6 +9,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using PluginForRevit2022.Core;
+using PluginForRevit2022.UI;
 using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox = System.Windows.Controls.TextBox;
 using Control = System.Windows.Controls.Control;
@@ -21,6 +22,7 @@ namespace PluginForRevit2022
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (ManualMarkingWindow.ActivateExisting()) return Result.Succeeded;
             UIDocument uiDoc = commandData.Application.ActiveUIDocument;
             Document doc = uiDoc.Document;
 
@@ -31,6 +33,7 @@ namespace PluginForRevit2022
                 return Result.Cancelled;
             }
             MarkDevicesRequest request = window.Request;
+            if (!ProjectGuard.AllowMarking(commandData.Application, request)) return Result.Cancelled;
 
             if (!MarkingSettings.Load().AnyInLine(request.System))
             {
@@ -38,44 +41,50 @@ namespace PluginForRevit2022
                 return Result.Cancelled;
             }
 
-            // Семейства системы без БЦО — сказать до кликов, а не после выбора всей линии
-            MarkingSettings bcoSettings = MarkingSettings.Load();
-            List<string> noBco = MarkingSettings.ReadAccount().Families
-                .Where(f => bcoSettings.IsInLine(f.Name, request.System) && string.IsNullOrWhiteSpace(f.Bco)).Select(f => f.Name).ToList();
-            if (noBco.Count > 0 && !SessionWindows.Confirm("mark-no-bco", "Маркировка",
-                    "У семейств с галочкой этой системы не задано БЦО:\n" + string.Join("\n", noBco.Select(f => "• " + f)) +
-                    "\n\nЕсли такие устройства окажутся в выборе, маркировка не начнётся. Продолжить выбор устройств?"))
-                return Result.Cancelled;
+            // У ручной маркировки БЦО проверяется при применении для фактически выбранных устройств.
+            if (request.Order != "manual")
+            {
+                MarkingSettings bcoSettings = MarkingSettings.Load();
+                List<string> noBco = MarkingSettings.ReadAccount().Families
+                    .Where(f => bcoSettings.IsInLine(f.Name, request.System) && string.IsNullOrWhiteSpace(f.Bco)).Select(f => f.Name).ToList();
+                if (noBco.Count > 0 && !SessionWindows.Confirm("mark-no-bco", "Маркировка",
+                        "У семейств с галочкой этой системы не задано БЦО:\n" + string.Join("\n", noBco.Select(f => "• " + f)) +
+                        "\n\nЕсли такие устройства окажутся в выборе, маркировка не начнётся. Продолжить выбор устройств?"))
+                    return Result.Cancelled;
+            }
 
             try
             {
-                if (request.Order == "route")
+                bool souye = request.System == "souye";
+                Reference controller = uiDoc.Selection.PickObject(ObjectType.Element,
+                    new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment),
+                    souye ? "Выберите стойку СОУЭ" : "Выберите прибор, к которому подключена линия");
+                request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
+                if (souye)
                 {
-                    SessionWindows.Inform("mark-route-hint", "Маркировка",
-                        $"Маршрут строится по трассам этой линии: у семейств кабеля в «ADSK_Группирование» должно стоять …АЛС.{request.Controller}.{request.Line} " +
-                        "(например СПС_АЛС.1.2 — прибор 1, линия 2). Если таких трасс нет, берутся трассы с тем же значением «Комментарии», что в окне.\n\n" +
-                        "Шаг 1: кликните прибор (категория «Электрооборудование»), от которого идёт линия.\n\n" +
-                        "Шаг 2: кликайте устройства линии — каждое выбранное становится синим. Порядок кликов не важен: номера пойдут по трассе. Чтобы закончить выбор, нажмите Esc.\n\n" +
-                        "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
-                    Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, от которого идёт линия");
-                    request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
-                    request.Ids = PickInOrder(uiDoc, DeviceFilter(request.System));
+                    var rack = doc.GetElement(controller) as FamilyInstance;
+                    if (!SouyeLineIdentity.IsRack(rack))
+                        throw new InvalidOperationException("Выберите экземпляр стойки СОУЭ.");
+                    if (!SouyeMarkingSelection.ChooseNumber(commandData.Application.MainWindowHandle, request, rack))
+                        return Result.Cancelled;
                 }
-                else
+                ISelectionFilter deviceFilter = DeviceFilter(request.System);
+                if (request.Order == "manual")
                 {
-                    SessionWindows.Inform("mark-manual-hint", "Маркировка",
-                        "Шаг 1: кликните прибор (категория «Электрооборудование»), к которому подключена линия. " +
-                        "В него запишутся данные для кабельного журнала.\n\n" +
-                        "Шаг 2: кликайте устройства по порядку номеров — каждое выбранное становится синим. Чтобы закончить выбор, нажмите Esc.\n\n" +
-                        "Выбрать можно только семейства с галочкой этой системы в настройках маркировки.");
-                    Reference controller = uiDoc.Selection.PickObject(ObjectType.Element, new CategoryFilter(null, BuiltInCategory.OST_ElectricalEquipment), "Выберите прибор, к которому подключена линия");
-                    request.ControllerElementId = RevitIds.IdOf(controller.ElementId);
-                    request.Ids = PickInOrder(uiDoc, DeviceFilter(request.System));
+                    ManualMarkingWindow.Open(commandData.Application, request, deviceFilter, window.SystemTitle);
+                    return Result.Succeeded;
                 }
+
+                request.Ids = SouyeMarkingSelection.Pick(uiDoc, commandData.Application.MainWindowHandle, deviceFilter, request);
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
                 return Result.Cancelled;
+            }
+            catch (Exception ex)
+            {
+                TaskDialog.Show("Маркировка", ex.Message);
+                return Result.Failed;
             }
             if (request.Ids.Count == 0)
             {
@@ -84,6 +93,7 @@ namespace PluginForRevit2022
 
             try
             {
+                request.ReusePreviewOrder = true;
                 request.DryRun = true;
                 Dictionary<string, object> preview = DeviceMarkingOperations.Mark(doc, request);
                 if (((List<string>)preview["failures"]).Count > 0)
@@ -108,8 +118,19 @@ namespace PluginForRevit2022
                     return Result.Cancelled;
                 }
                 request.DryRun = false;
-                SessionWindows.Inform("mark-devices-result", "Маркировка", (string)DeviceMarkingOperations.Mark(doc, request)["summary"]);
+                Dictionary<string, object> result = DeviceMarkingOperations.Mark(doc, request);
+                if (!(bool)result["applied"])
+                {
+                    TaskDialog.Show("Маркировка", result["summary"] + "\n\n" + string.Join("\n", ((List<string>)result["failures"]).Take(15)));
+                    return Result.Failed;
+                }
+                SessionWindows.Inform("mark-devices-result", "Маркировка", (string)result["summary"]);
                 return Result.Succeeded;
+            }
+            catch (SouyeRouteLayoutException ex)
+            {
+                TaskDialog.Show(SouyeRouteLayoutException.DialogTitle, ex.Message);
+                return Result.Failed;
             }
             catch (Exception ex)
             {
@@ -187,8 +208,8 @@ namespace PluginForRevit2022
             return ids;
         }
 
-        /// <summary>Зелёная сплошная заливка и линии; null — в проекте нет сплошной заливки.</summary>
-        private static OverrideGraphicSettings PickedOverride(Document doc)
+        /// <summary>Временная синяя заливка и линии для выбранных устройств.</summary>
+        internal static OverrideGraphicSettings PickedOverride(Document doc)
         {
             FillPatternElement solid = new FilteredElementCollector(doc).OfClass(typeof(FillPatternElement))
                 .Cast<FillPatternElement>().FirstOrDefault(p => p.GetFillPattern().IsSolidFill);
@@ -237,8 +258,9 @@ namespace PluginForRevit2022
     internal sealed class MarkDevicesWindow : Window
     {
         private readonly ComboBox _system = Combo("АПС|aps", "СОТС|security", "СОУЭ|souye");
-        private readonly ComboBox _order = Combo("Вручную, кликами по устройствам|manual", "Автоматически по трассам журнала|route");
+        private readonly ComboBox _order = Combo("Вручную, выбором устройств|manual", "Автоматически по трассам журнала|route");
         private readonly TextBox _building = new TextBox();
+        private readonly bool _souyeFunctionalZones = MarkingSettings.CurrentJournal().SouyeFunctionalZones;
         private readonly TextBox _controller = new TextBox();
         private readonly TextBox _line = new TextBox();
         private readonly TextBox _comments = new TextBox();
@@ -254,23 +276,38 @@ namespace PluginForRevit2022
         {
             _doc = doc;
             Title = "Маркировка устройств";
+            AerBimAppearance.Apply(this);
             Width = 420;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var panel = new StackPanel { Margin = new Thickness(12) };
-            void Row(string label, Control control)
+            Label Row(string label, Control control)
             {
-                panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 2) });
+                var fieldLabel = AerBimAppearance.Label(label, control);
+                panel.Children.Add(fieldLabel);
                 panel.Children.Add(control);
+                return fieldLabel;
             }
             Row("Система", _system);
             Row("Порядок номеров", _order);
-            Row("Корпус (ARBM_Корпус; для СОТС не нужен)", _building);
-            Row("Номер прибора", _controller);
-            Row("Номер линии", _line);
-            Row("Комментарии линии (например АПС): участвуют только устройства и трассы с этим значением", _comments);
+            var buildingLabel = Row("Корпус", _building);
+            var controllerLabel = Row("Номер прибора", _controller);
+            var lineLabel = Row("Номер линии", _line);
+            Row("Комментарии", _comments);
+            void UpdateSystemFields()
+            {
+                string system = Value(_system);
+                bool souye = system == "souye";
+                buildingLabel.Visibility = _building.Visibility = system == "security"
+                    ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+                buildingLabel.Content = souye && _souyeFunctionalZones ? "Функциональная зона (необязательно)" : "Корпус";
+                controllerLabel.Content = souye ? "Номер прибора в стойке" : "Номер прибора";
+                lineLabel.Content = souye ? "Номер линии (1–20)" : "Номер линии";
+            }
+            UpdateSystemFields();
+            _system.SelectionChanged += (s, e) => UpdateSystemFields();
             // Уровни без номера в имени («Тех. пространство», «Кровля») — у каждого свой этаж, задаётся отдельно
             var floors = new Button { Content = "Этажи уровней без номера…", Margin = new Thickness(0, 10, 0, 0), Padding = new Thickness(6, 3, 6, 3), HorizontalAlignment = HorizontalAlignment.Left };
             floors.Click += (s, e) =>
@@ -285,6 +322,7 @@ namespace PluginForRevit2022
             Row("Начать нумерацию с", _start);
 
             var ok = new Button { Content = "Далее: выбрать устройства", IsDefault = true, Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(6) };
+            AerBimAppearance.Primary(this, ok);
             ok.Click += (s, e) => Accept();
             panel.Children.Add(ok);
             Content = panel;
@@ -371,6 +409,7 @@ namespace PluginForRevit2022
                 System = Value(_system),
                 Order = Value(_order),
                 Building = _building.Text,
+                FunctionalZones = _souyeFunctionalZones && Value(_system) == "souye",
                 Controller = _controller.Text,
                 Line = _line.Text,
                 Comments = _comments.Text,
@@ -410,6 +449,7 @@ namespace PluginForRevit2022
         {
             _doc = doc;
             Title = "Этажи уровней без номера";
+            AerBimAppearance.Apply(this);
             Width = 420;
             SizeToContent = SizeToContent.Height;
             MaxHeight = 640;
@@ -452,6 +492,7 @@ namespace PluginForRevit2022
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
             var save = new Button { Content = "Сохранить", IsDefault = true, Padding = new Thickness(12, 4, 12, 4) };
+            AerBimAppearance.Primary(this, save);
             save.Click += (s, e) => Save();
             var cancel = new Button { Content = "Отмена", IsCancel = true, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(8, 0, 0, 0) };
             buttons.Children.Add(save);

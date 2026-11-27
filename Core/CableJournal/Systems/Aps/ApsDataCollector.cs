@@ -1,4 +1,5 @@
-﻿using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
+using PluginForRevit2022.Core;
+using TaskDialog = PluginForRevit2022.Core.CableJournal.JournalDialog;
 using ARBM.CableJournalExporter.Models;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -84,7 +85,7 @@ namespace ARBM.CableJournalExporter.Services
                     }).ToList();
                     if (matchingControllers.Count == 0)
                     {
-                        var names = allControllers.Select(c => c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString())
+                        var names = allControllers.Select(c => RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString())
                             .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().Take(10).ToList();
                         string found = names.Count == 0 ? "нет приборов с заполненным именем" : string.Join(", ", names);
                         TaskDialog.Show("Прибор АПС не найден",
@@ -105,8 +106,8 @@ namespace ARBM.CableJournalExporter.Services
                 var controllersWithValidParams = allControllers
                     .Where(c =>
                     {
-                        string name = c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                        string floor = c.LookupParameter(_parser.FloorParameter)?.AsString();
+                        string name = RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString();
+                        string floor = RevitText.FindParameter(c, _parser.FloorParameter)?.AsString();
 
                         return !string.IsNullOrWhiteSpace(name) &&
                                name != null && name.IndexOf("ARK", StringComparison.OrdinalIgnoreCase) >= 0 &&
@@ -230,7 +231,6 @@ namespace ARBM.CableJournalExporter.Services
                             var byId = loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
                             var order = PluginForRevit2022.Core.LineConnectionOrder.Ordered(loop.Devices.Select(d => (FamilyInstance)d.BaseInfo.Element), saved.Order);
                             loop.Devices = order.Select(d => byId[d.UniqueId]).ToList();
-                            loop.ConnectionLineKey = key;
                         }
                         catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
                         {
@@ -245,7 +245,7 @@ namespace ARBM.CableJournalExporter.Services
                 // Устройства, не попавшие ни к одному ПКП (корпус или номер прибора не совпали — например «М» кириллицей)
                 var used = new HashSet<ElementId>(result.SelectMany(c => c.Loops).SelectMany(l => l.Devices).Select(x => x.BaseInfo?.Element?.Id).Where(id => id != null));
                 foreach (var d in devices.Where(d => !used.Contains(d.Id) && !_skippedIds.Contains(d.Id)))
-                    _skipped.Add($"устройство id {d.Id}: нет ПКП с корпусом «{d.LookupParameter("ARBM_Корпус")?.AsString()}» и номером прибора «{d.LookupParameter("ARBM_Номер прибора")?.AsString()}» (или имя этого ПКП не разобрано — см. выше)");
+                    _skipped.Add($"устройство id {d.Id}: нет ПКП с корпусом «{RevitText.FindParameter(d, "ARBM_Корпус")?.AsString()}» и номером прибора «{RevitText.FindParameter(d, "ARBM_Номер прибора")?.AsString()}» (или имя этого ПКП не разобрано — см. выше)");
                 ReportSkipped();
 
                 return result
@@ -290,7 +290,7 @@ namespace ARBM.CableJournalExporter.Services
         private string EmptyDeviceParams(FamilyInstance d)
         {
             var empty = new[] { "ARBM_Корпус", "ARBM_Номер прибора", _parser.FloorParameter, "ARBM_ПСБ_БЦО", "ARBM_Номер линии", "ARBM_SP_ElementMark" }
-                .Where(p => string.IsNullOrWhiteSpace(d.LookupParameter(p)?.AsString())).ToList();
+                .Where(p => string.IsNullOrWhiteSpace(RevitText.FindParameter(d, p)?.AsString())).ToList();
             return empty.Count == 0 ? null : string.Join(", ", empty);
         }
 
@@ -311,7 +311,7 @@ namespace ARBM.CableJournalExporter.Services
 
             // Группируем контроллеры по корпусу, затем по номеру прибора
             var groupedControllers = controllers
-                .GroupBy(c => c.LookupParameter("ARBM_ПС_Имя изделия")?.AsString())
+                .GroupBy(c => RevitText.FindParameter(c, "ARBM_ПС_Имя изделия")?.AsString())
                 .OrderBy(g => g.Key)
                 .SelectMany(g => g)
                 .ToList();
@@ -325,7 +325,7 @@ namespace ARBM.CableJournalExporter.Services
                 var apsController = _parser.ParseController(controllerElement) as ApsController;
                 if (apsController == null)
                 {
-                    _skipped.Add($"ПКП id {controllerElement.Id} «{controllerElement.LookupParameter("ARBM_ПС_Имя изделия")?.AsString()}»: не разобрано имя или «{_parser.FloorParameter}» не числом");
+                    _skipped.Add($"ПКП id {controllerElement.Id} «{RevitText.FindParameter(controllerElement, "ARBM_ПС_Имя изделия")?.AsString()}»: не разобрано имя или «{_parser.FloorParameter}» не числом");
                     continue;
                 }
 
@@ -335,7 +335,7 @@ namespace ARBM.CableJournalExporter.Services
                 var controllerDevices = devices
                     .Where(d =>
                     {
-                        string devBuilding = d.LookupParameter("ARBM_Корпус")?.AsString();
+                        string devBuilding = RevitText.FindParameter(d, "ARBM_Корпус")?.AsString();
                         int? devController = GetIntParam(d, "ARBM_Номер прибора");
 
                         return !string.IsNullOrWhiteSpace(devBuilding) &&
@@ -392,8 +392,7 @@ namespace ARBM.CableJournalExporter.Services
                 {
                     Controller = apsController,
                     ControllerId = controllerId,
-                    Loops = loopGroups,
-                    Expanders = new List<ApsExpander>()
+                    Loops = loopGroups
                 };
 
                 result.Add(controllerWithLoops);
@@ -410,7 +409,7 @@ namespace ARBM.CableJournalExporter.Services
         {
             try
             {
-                string value = element.LookupParameter(paramName)?.AsString();
+                string value = RevitText.FindParameter(element, paramName)?.AsString();
                 if (string.IsNullOrWhiteSpace(value))
                     return null;
 
@@ -432,8 +431,8 @@ namespace ARBM.CableJournalExporter.Services
 
             foreach (var ctrl in invalidControllers)
             {
-                string name = ctrl.LookupParameter("ARBM_ПС_Имя изделия")?.AsString();
-                string floor = ctrl.LookupParameter(_parser.FloorParameter)?.AsString();
+                string name = RevitText.FindParameter(ctrl, "ARBM_ПС_Имя изделия")?.AsString();
+                string floor = RevitText.FindParameter(ctrl, _parser.FloorParameter)?.AsString();
 
                 errorMessage += $"Прибор «{name ?? ctrl.Name}» (ID {ctrl.Id})\n";
 

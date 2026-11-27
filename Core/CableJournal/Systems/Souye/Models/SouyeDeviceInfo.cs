@@ -10,6 +10,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
     /// </summary>
     public class SouyeControllerInfo
     {
+        // Код прибора внутри физической стойки.
+        public int? RackNumber { get; set; }
+        public bool RackContainsSeveralDevices { get; set; }
+
         /// <summary>
         /// Ссылка на элемент Revit (прибор управления оповещением).
         /// Используется для расчёта длины кабеля до первого оповещателя шлейфа.
@@ -51,6 +55,9 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
     /// </summary>
     public class SouyeDeviceInfo
     {
+        public int? RackNumber { get; set; }
+        public bool UsesLegacyNumber { get; set; }
+
         /// <summary>
         /// Ссылка на элемент Revit (оповещатель).
         /// Используется для расчёта длины кабеля между соседними устройствами шлейфа.
@@ -81,7 +88,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
 
         /// <summary>
         /// Адрес шлейфа (номер шлейфа) в виде строки — как хранится в параметре Revit.
-        /// Источник: параметр <c>ARBM_ПСБ_Адрес устройства</c>.
+        /// Источник: параметр <c>ARBM_Номер линии (или ARBM_ПСБ_Адрес устройства для старых линий)</c>.
         /// Должен быть числовым — валидируется в <see cref="SouyeDataValidator"/>.
         /// </summary>
         public string LoopAddressRaw { get; set; }
@@ -119,7 +126,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
 
     /// <summary>
     /// Группа оповещателей, объединённых одним шлейфом СОУЭ.
-    /// Шлейф определяется единым значением <c>ARBM_ПСБ_Адрес устройства</c>.
+    /// Шлейф определяется единым значением <c>ARBM_Номер линии (или ARBM_ПСБ_Адрес устройства для старых линий)</c>.
     /// </summary>
     public class SouyeLoopGroup
     {
@@ -128,6 +135,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye.Models
         /// Соответствует <see cref="SouyeDeviceInfo.LoopAddressParsed"/> всех устройств группы.
         /// </summary>
         public int LoopAddress { get; set; }
+        internal bool FunctionalZones { get; set; }
 
         /// <summary>
         /// Список оповещателей шлейфа, отсортированных по <see cref="SouyeDeviceInfo.ElementMarkParsed"/>

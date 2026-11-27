@@ -9,7 +9,7 @@ using PluginForRevit2022.Core;
 
 namespace PluginForRevit2022
 {
-    /// <summary>Перед запуском команды с ленты проверяет параметры плагина в проекте. Кнопки MCP не проверяются.</summary>
+    /// <summary>Журналирование ручных команд и контекст переключения видов.</summary>
     public abstract class GuardedCommand<TCommand> : IExternalCommand where TCommand : IExternalCommand, new()
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
@@ -20,11 +20,7 @@ namespace PluginForRevit2022
             PluginLog.Info("command.start", $"{name} | {document}");
             try
             {
-                if (!ProjectGuard.Allow(commandData.Application))
-                {
-                    PluginLog.Info("command.end", $"{name} | Cancelled на проверке параметров | {timer.ElapsedMilliseconds} мс");
-                    return Result.Cancelled;
-                }
+
                 Result result;
                 ViewSession.Ui = commandData.Application.ActiveUIDocument; // команды на нескольких видах открывают их по очереди
                 try
@@ -83,10 +79,8 @@ namespace PluginForRevit2022
 
     internal static class ProjectGuard
     {
-        private const string WindowKey = "project-check";
-
-        /// <summary>true — команду можно запускать.</summary>
-        public static bool Allow(UIApplication uiApp)
+        /// <summary>Проверяет привязки, нужные выбранной системе маркировки.</summary>
+        public static bool AllowMarking(UIApplication uiApp, MarkDevicesRequest request)
         {
             Document doc = uiApp.ActiveUIDocument?.Document;
             if (doc == null || doc.IsFamilyDocument)
@@ -94,42 +88,30 @@ namespace PluginForRevit2022
                 return true; // параметры проекта к семейству не относятся
             }
 
-            // СОУЭ проверяет мощность оповещателей после выбора стандарта, включая параметры семейства.
-            bool includeDefaultFloor = string.Equals(MarkingSettings.CurrentFloorParameter(),
-                MarkingSettings.DefaultFloorParameter, StringComparison.OrdinalIgnoreCase);
-            List<ParameterIssue> issues = PluginParameterCheck.Check(doc, includePower: false, includeDefaultFloor: includeDefaultFloor);
+            var required = MarkingBindings(request);
+            List<ParameterIssue> issues = PluginParameterCheck.Check(doc, scope: required);
             if (issues.Count == 0)
             {
                 return true;
             }
             PluginLog.Info("parameters.issues", string.Join("; ", issues.Select(i => $"{i.Name}: {i.Kind}")));
 
-            if (SessionWindows.IsHidden(WindowKey))
-            {
-                return true; // окно скрыто пользователем: команда идёт без изменений проекта
-            }
 
             bool canFix = issues.Any(i => i.CanFix);
             var dialog = new TaskDialog("Проверка параметров проекта")
             {
-                MainInstruction = "В проекте не настроены параметры плагина",
+                MainInstruction = "Для выбранной системы не настроены параметры маркировки",
                 MainContent = PluginParameterCheck.Report(issues),
                 CommonButtons = TaskDialogCommonButtons.Cancel,
-                VerificationText = SessionWindows.CheckText,
             };
             if (canFix)
             {
                 dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Добавить параметры и категории", "Загрузить недостающее из ФОП плагина и продолжить");
             }
             dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Продолжить без изменений", "Команда может работать неполно");
-            // Кнопка по умолчанию задаётся только после добавления ссылок: иначе Revit выдаёт ArgumentException.
-            dialog.DefaultButton = canFix ? TaskDialogResult.CommandLink1 : TaskDialogResult.CommandLink2;
+            dialog.DefaultButton = TaskDialogResult.CommandLink2;
 
             TaskDialogResult answer = dialog.Show();
-            if (dialog.WasVerificationChecked() && (answer == TaskDialogResult.CommandLink1 || answer == TaskDialogResult.CommandLink2))
-            {
-                SessionWindows.Hide(WindowKey);
-            }
             if (answer == TaskDialogResult.CommandLink2)
             {
                 return true;
@@ -142,7 +124,7 @@ namespace PluginForRevit2022
             try
             {
                 PluginParameterCheck.Fix(doc, uiApp.Application, issues, false);
-                List<ParameterIssue> left = PluginParameterCheck.Check(doc, includePower: false, includeDefaultFloor: includeDefaultFloor);
+                List<ParameterIssue> left = PluginParameterCheck.Check(doc, scope: required);
                 if (left.Count > 0)
                 {
                     TaskDialog.Show("Проверка параметров проекта", "Исправлено не всё:\n\n" + PluginParameterCheck.Report(left));
@@ -154,6 +136,47 @@ namespace PluginForRevit2022
                 TaskDialog.Show("Проверка параметров проекта", "Не удалось добавить параметры: " + ex.Message);
                 return false;
             }
+        }
+
+        private static Dictionary<string, BuiltInCategory[]> MarkingBindings(MarkDevicesRequest request)
+        {
+            const BuiltInCategory controller = BuiltInCategory.OST_ElectricalEquipment;
+            BuiltInCategory[] devices;
+            switch (request.System)
+            {
+                case "aps":
+                    devices = new[] { BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_FireAlarmDevices };
+                    break;
+                case "souye":
+                    devices = new[] { BuiltInCategory.OST_NurseCallDevices };
+                    break;
+                default:
+                    devices = new[] { BuiltInCategory.OST_DataDevices };
+                    break;
+            }
+            BuiltInCategory[] devicesAndController = devices.Append(controller).ToArray();
+            var required = new Dictionary<string, BuiltInCategory[]>
+            {
+                [DeviceMarkingOperations.ParamProductName] = new[] { controller },
+                [DeviceMarkingOperations.ParamBco] = devices,
+                [DeviceMarkingOperations.ParamMark] = devices,
+            };
+            if (PluginParameterCheck.IsStandardFloor(MarkingSettings.CurrentFloorParameter()))
+                required[MarkingSettings.DefaultFloorParameter] = request.Order == "route"
+                    ? devicesAndController.Append(BuiltInCategory.OST_MechanicalEquipment).ToArray()
+                    : devicesAndController;
+
+            if (request.System == "security")
+            {
+                required[DeviceMarkingOperations.ParamAddress] = devices;
+                return required;
+            }
+
+            if (!request.FunctionalZones || !string.IsNullOrWhiteSpace(request.Building))
+                required[DeviceMarkingOperations.ParamBuilding] = request.FunctionalZones ? devices : devicesAndController;
+            required[DeviceMarkingOperations.ParamController] = request.System == "souye" ? devicesAndController : devices;
+            required[DeviceMarkingOperations.ParamLine] = devices;
+            return required;
         }
     }
 

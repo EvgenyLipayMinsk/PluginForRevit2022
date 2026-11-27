@@ -1,6 +1,6 @@
-﻿using ARBM.CableJournalExporter.Models;
+using PluginForRevit2022.Core;
+using ARBM.CableJournalExporter.Models;
 using ARBM.CableJournalExporter.Revit;
-using ARBM.CableJournalExporter.Services;
 using ARBM.CableJournalExporter.Services;
 using ARBM.CableJournalExporter.Systems.Security.Models;
 using Autodesk.Revit.Attributes;
@@ -75,8 +75,8 @@ namespace ARBM.CableJournalExporter.Commands
 
                 if (records.Count == 0)
                 {
-                    TaskDialog.Show("No data",
-                        "No CableRecord entries were generated.");
+                    TaskDialog.Show("Нет данных для КЖ",
+                        "Не сформировано ни одной строки кабельного журнала. Проверьте маркировку устройств и наличие трасс для выбранной линии.");
                     return Result.Cancelled;
                 }
                 // ---------------------------------------------------------
@@ -105,6 +105,11 @@ namespace ARBM.CableJournalExporter.Commands
                     $"Кабельный журнал успешно создан:\n{savePath}");
 
                 return Result.Succeeded;
+            }
+            catch (CableWalk.TunnelException ex)
+            {
+                TaskDialog.Show(CableWalk.TunnelErrorTitle, ex.Message);
+                return Result.Failed;
             }
             catch (Exception ex)
             {

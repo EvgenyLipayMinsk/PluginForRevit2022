@@ -1268,7 +1268,7 @@
     {
       "name": "get_parameter_values",
       "title": "Read parameter values",
-      "description": "Reads parameter values of elements: select by ids or categories (optionally only those visible in a view, or from a linked model with link), filter with where-conditions (equals, not_equals, contains, not_contains, begins_with, empty, not_empty, greater, less). For each requested parameter returns the value as shown in Revit, storage type, whether it is a type parameter and read-only. Without parameters (or with listParameterNames) returns the available instance and type parameter names per category. At most 300 elements are returned in detail; total is always reported.",
+      "description": "Reads parameter values of elements: select by ids or categories (optionally only those visible in a view, or from a linked model with link), filter with where-conditions (equals, not_equals, contains, not_contains, begins_with, empty, not_empty, greater, less). Parameter names or shared parameter GUIDs can be used for parameter lists and conditions. For each requested parameter returns the value as shown in Revit, storage type, whether it is a type parameter and read-only. Without parameters (or with listParameterNames) returns the available instance and type parameter names per category. At most 300 elements are returned in detail; total is always reported.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1338,7 +1338,7 @@
     {
       "name": "set_parameter_values",
       "title": "Write parameter values",
-      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z). If Revit rejects the batch (an error on one element rolls back everything), values are written element by element: rejected elements are skipped and listed in rejected with the Revit message; Revit warnings do not stop the write and are returned in revitWarnings. All of it is one Ctrl+Z step.",
+      "description": "Writes parameter values of project elements. Either the same 'values' for all selected elements (selection as in get_parameter_values: ids / categories / view / where / types), or per-element 'items' [{id, values}]. Use exact parameter names or shared parameter GUIDs as keys and in conditions. Values are text as in Revit: numbers may include units ('2400', '2,4 м'), Yes/No as 'да/нет'. Type parameters change every instance of the type and are blocked unless allowTypeParameters=true; the result lists affected types with instance counts. Read-only, formula-driven and missing parameters are reported and skipped. Linked elements cannot be changed. dryRun defaults to true: shows old -> new per element; get the user's confirmation before dryRun=false. Undoable (Ctrl+Z). If Revit rejects the batch (an error on one element rolls back everything), values are written element by element: rejected elements are skipped and listed in rejected with the Revit message; Revit warnings do not stop the write and are returned in revitWarnings. All of it is one Ctrl+Z step.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1434,6 +1434,31 @@
           "system"
         ],
         "properties": {
+          "apsLineKey": {
+            "type": "string",
+            "description": "Exact APS line key from list_marked_lines. Selects only that line and supplies its Comments value."
+          },
+          "previewConnectionOrder": {
+            "type": "boolean",
+            "default": false,
+            "description": "With apsLineKey and dryRun=true, returns the available devices and proposed connection order without calculating cable lengths or saving."
+          },
+          "connectionOrder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "For apsLineKey, supply all devices by uniqueId in the designer-approved order. dryRun calculates the resulting journal. A successful dryRun=false export also saves the order in the model."
+          },
+          "acceptFallbackLengths": {
+            "type": "boolean",
+            "default": false,
+            "description": "For apsLineKey only. Allow exporting after the designer reviews the fallback lengths reported by dryRun."
+          },
+          "controllerElementId": {
+            "type": "integer",
+            "description": "SOUYE physical rack element ID. Includes all marked devices listed in ARBM_Номер прибора on that rack, grouped by device and line. Comments can be read from the rack."
+          },
           "system": {
             "type": "string",
             "enum": [
@@ -1445,7 +1470,7 @@
           },
           "comments": {
             "type": "string",
-            "description": "Value of the Comments parameter selecting the elements, e.g. АПС. Required for aps and souye; for security empty = all controllers."
+            "description": "Value of the Comments parameter selecting the elements, e.g. АПС. Required for aps without apsLineKey and for souye without controllerElementId; for security empty = all controllers."
           },
           "parameterStandard": {
             "type": "string",
@@ -1489,7 +1514,7 @@
     {
       "name": "mark_devices",
       "title": "Mark devices for the cable journal",
-      "description": "Fills the parameters the cable journal reads for one line (loop): building, controller, BCO, line, address, sequential ARBM_SP_ElementMark, floor and Comments. Cable routes are not changed: their floor (ADSK_Этаж, digits) is filled manually. order=manual numbers devices in the order of ids; order=route numbers them along the journal's routes starting at the controller (controllerElementId) using only cable routes of this line: ADSK_Группирование like СПС_АЛС.<controller>.<line> (e.g. СПС_АЛС.1.2 = controller 1, line 2); if no such routes exist, falls back to routes with the same Comments value. Devices are numbered in the order the line cable reaches them (cable assembled from its segments); this needs ADSK_Этаж (digits, filled manually) on every route of the line — otherwise a warning lists the routes without it and the order falls back to minimum cable length over the journal graph. All-or-nothing: on any failure nothing is written. dryRun defaults to true. order=snake numbers devices in alternating rows across the plan. The current user's marking settings (get_marking_settings) override bco per family and exclude families not ticked for the system. The result reports lineAddresses out of lineCapacity (250) and warns when the line is over capacity. Warns when the line already has marked devices outside the selection. Parameters of another system left from earlier marking are cleared: aps clears ARBM_ПСБ_Адрес устройства; souye clears ARBM_Номер прибора and ARBM_Номер линии; security also clears ARBM_Корпус.",
+      "description": "Writes marking for one line. For SOUYE select the rack with controllerElementId and specify a positive controller number from the comma-separated ARBM_Номер прибора field on the rack and a line from 1 to 20. The profile selects physical buildings or optional functional zones. The first marking can fill an empty rack number. A route tagged ЛРО.2 applies to every line of device 2. A comma-separated list such as ЛРО.1, ЛРО.2 applies to both devices. SOUYE stores rack and line in ARBM_Номер прибора and ARBM_Номер линии. order=route uses only routes with the requested line grouping, building when required and Comments. It stops if the route cannot reach all selected devices. APS and security have their existing route fallback. The floor parameter is chosen in the marking profile. order=manual uses the order of ids; order=snake uses alternating rows. dryRun=true is the default. Marking is transactional.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -1517,7 +1542,7 @@
           },
           "building": {
             "type": "string",
-            "description": "ARBM_Корпус. Required for aps and souye."
+            "description": "ARBM_Корпус. Required for APS and for SOUYE in different-buildings mode. In functional-zones mode an omitted value preserves existing zones."
           },
           "controller": {
             "type": "string",
@@ -1529,7 +1554,7 @@
           },
           "line": {
             "type": "string",
-            "description": "Line number."
+            "description": "Line number. SOUYE accepts 1–20."
           },
           "comments": {
             "type": "string",
@@ -1537,7 +1562,7 @@
           },
           "floor": {
             "type": "string",
-            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. SOUYE: ARBM_ПСБ_Адрес устройства is written as the loop number only (integer), security as controller.loop. Takes priority over the floors set in the marking window («Этажи уровней без номера»), which are used when floor is omitted."
+            "description": "Floor as a number for levels whose name has no number (e.g. 'Тех. Пространство'); other devices take the number from their level name. Security writes the address as controller.loop. Takes priority over the floors set in the marking window («Этажи уровней без номера»), which are used when floor is omitted."
           },
           "parameterStandard": {
             "type": "string",
@@ -1545,7 +1570,7 @@
               "adsk",
               "eom"
             ],
-            "description": "Deprecated and ignored: the SOUE floor parameter is taken from marking settings («Параметр этажа», set_marking_settings floorParameter); APS and SOTS always use ADSK_Этаж."
+            "description": "Deprecated and ignored. All systems use the profile floor parameter."
           },
           "startNumber": {
             "type": "integer",
@@ -1564,7 +1589,7 @@
           },
           "controllerElementId": {
             "type": "integer",
-            "description": "Controller element id (Electrical Equipment). Required for order=route; recommended always: the tool also writes into the controller what the journal needs (Comments, floor, ARBM_Корпус if empty, ARBM_ПС_Имя изделия: APS building.BCO.number, security ARK.floor.number, SOUYE BCO.number if empty). The controller's number and code come from its own ARBM_SP_ElementMark and ARBM_ПСБ_БЦО (e.g. ARK and 3 → M2.ARK.3); a warning is returned when that number differs from 'controller'. Changes are listed in result.controller.changes."
+            "description": "Controller element id (Electrical Equipment). Required for SOUYE and order=route; recommended always: the tool also writes into the controller what the journal needs (Comments, floor, ARBM_Корпус if empty, ARBM_ПС_Имя изделия: APS building.BCO.number, security ARK.floor.number, SOUYE BCO.number if empty). The controller's number and code come from its own ARBM_SP_ElementMark and ARBM_ПСБ_БЦО (e.g. ARK and 3 → M2.ARK.3); a warning is returned when that number differs from 'controller'. Changes are listed in result.controller.changes."
           },
           "dryRun": {
             "type": "boolean",
@@ -1752,7 +1777,11 @@
           },
           "floorParameter": {
             "type": "string",
-            "description": "Floor parameter of SOUE devices (any instance text parameter with «этаж» in its name). Used by marking and by the SOUE cable journal."
+            "description": "Floor parameter for marking and cable journals (an instance text parameter with «этаж» in its name)."
+          },
+          "souyeFunctionalZones": {
+            "type": "boolean",
+            "description": "True makes the SOUE building field an optional functional zone and links marked devices to the selected rack. False uses building codes to distinguish racks in different buildings."
           }
         }
       }
@@ -1883,7 +1912,7 @@
       "name": "assign_devices_to_lines",
       "timeoutSeconds": 300,
       "title": "Assign APS devices to lines by routes",
-      "description": "Read-only. Splits APS devices (Data Devices and Fire Alarm Devices of families ticked for АПС in the marking settings) into lines by cable routes: a route's line comes from ADSK_Группирование like СПС_АЛС.<controller>.<line>; a device belongs to the line whose route on the same level passes nearest, within maxDistanceMm (plan distance). For each line returns the ARK controller (ARK controllers are found by ARBM_ПСБ_БЦО containing ARK and the number in ARBM_SP_ElementMark), route count, device ids, families and the devices' current marking; also unassigned devices and devices near several lines. Use the result to call mark_devices per line with order=route, controllerElementId and the line's deviceIds.",
+      "description": "Read-only. Splits APS devices (Data Devices and Fire Alarm Devices of families ticked for АПС in the marking settings) into lines by cable routes: a route's line comes from ADSK_Группирование or О_Группирование like СПС_АЛС.<controller>.<line>; a device belongs to the line whose route on the same level passes nearest, within maxDistanceMm (plan distance). For each line returns the ARK controller (ARK controllers are found by ARBM_ПСБ_БЦО containing ARK and the number in ARBM_SP_ElementMark), route count, device ids, families and the devices' current marking; also unassigned devices and devices near several lines. Use the result to call mark_devices per line with order=route, controllerElementId and the line's deviceIds.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1902,7 +1931,7 @@
       "name": "check_journal_levels",
       "title": "Check levels for the cable journal",
       "timeoutSeconds": 300,
-      "description": "Read-only. Per line (cable routes by ADSK_Группирование …АЛС.<controller>.<line>, devices by ARBM_Номер прибора/ARBM_Номер линии) checks levels the way the APS cable journal determines them: cable routes without a level (journal puts them into a common '-1' graph), routes whose journal level differs from the level at their height, devices whose journal level differs from the level of the route they sit on (journal cannot find a path and silently bridges), devices not near any route of their line, and empty ADSK_Этаж on routes and devices. Returns element ids per line.",
+      "description": "Read-only. Per line (cable routes by ADSK_Группирование or О_Группирование …АЛС.<controller>.<line>, devices by ARBM_Номер прибора/ARBM_Номер линии) checks levels the way the APS cable journal determines them: cable routes without a level (journal puts them into a common '-1' graph), routes whose journal level differs from the level at their height, devices whose journal level differs from the level of the route they sit on (journal cannot find a path and silently bridges), devices not near any route of their line, and empty ADSK_Этаж on routes and devices. Returns element ids per line.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3726,7 +3755,7 @@
     {
       "name": "check_cable_routes",
       "title": "Check cable route connectivity",
-      "description": "Read-only connectivity check of marked lines using the same CableWalk graph as route-based marking: joins 100 mm, device attachment 600 mm, controller attachment 3 m, inter-floor transitions included. Returns unreachable devices and route IDs, graph components, branch coordinates and open ends. Branches/open ends are information, not automatically errors. Automatically resolves APS controllers; address-based security/SOUYE lines require an explicit line, controllerElementId and routeGrouping. Does not repair gaps or write ADSK_Этаж/ADSK_Группирование.",
+      "description": "Read-only connectivity check of marked lines using the same CableWalk graph as route-based marking: joins 100 mm, device attachment 600 mm, controller attachment 3 m, inter-floor transitions included. Returns unreachable devices and route IDs, graph components, branch coordinates and open ends. Branches/open ends are information, not automatically errors. Automatically resolves APS controllers and SOUYE racks with separate rack and line numbers. Legacy address-based lines require an explicit line, controllerElementId and routeGrouping. Does not repair gaps or write ADSK_Этаж/ADSK_Группирование.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3745,7 +3774,7 @@
           },
           "routeGrouping": {
             "type": "string",
-            "description": "Exact ADSK_Группирование of routes. Required for address-based security/SOUYE lines."
+            "description": "Exact grouping value of routes (ADSK_Группирование or О_Группирование). Required for address-based security/SOUYE lines."
           }
         },
         "required": [],
@@ -3763,6 +3792,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "controllerElementId": {
+            "type": "integer",
+            "description": "SOUYE physical rack element ID. Includes all marked devices listed in ARBM_Номер прибора on that rack, grouped by device and line. Comments can be read from the rack."
+          },
           "system": {
             "type": "string",
             "enum": [
@@ -3774,7 +3807,7 @@
           },
           "comments": {
             "type": "string",
-            "description": "Comments filter. Required for aps and souye."
+            "description": "Comments filter. Required for aps and for souye without controllerElementId."
           },
           "parameterStandard": {
             "type": "string",
@@ -3871,6 +3904,15 @@
             "type": "boolean",
             "default": false,
             "description": "Remove only the custom screenshot; restore original Navisworks image if any."
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "active_model"
+            ],
+            "default": "all",
+            "description": "Excel export only. all includes the entire report. active_model matches the Revit UI current-model filter and requires an open Revit project."
           },
           "savePath": {
             "type": "string",
@@ -4045,6 +4087,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "controllerElementId": {
+            "type": "integer",
+            "description": "SOUYE physical rack element ID. Includes all marked devices listed in ARBM_Номер прибора on that rack, grouped by device and line. Comments can be read from the rack."
+          },
           "system": {
             "type": "string",
             "enum": [
@@ -4056,7 +4102,7 @@
           },
           "comments": {
             "type": "string",
-            "description": "Comments filter. Required for aps and souye."
+            "description": "Comments filter. Required for aps and for souye without controllerElementId."
           },
           "parameterStandard": {
             "type": "string",
@@ -4110,7 +4156,7 @@
           },
           "routeGrouping": {
             "type": "string",
-            "description": "Exact ADSK_Группирование of routes. Required for address-based security/SOUYE lines."
+            "description": "Exact grouping value of routes (ADSK_Группирование or О_Группирование). Required for address-based security/SOUYE lines."
           },
           "checks": {
             "type": "array",

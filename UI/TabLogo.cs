@@ -85,7 +85,7 @@ namespace PluginForRevit2022.UI
                     return bitmap;
                 }
             }
-            var accent = new SolidColorBrush(Color.FromRgb(0x1F, 0x6F, 0xB2));
+            Brush accent = AerBimAppearance.AccentBrush;
             var white = new Pen(Brushes.White, 2.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
             var group = new DrawingGroup();
             group.Children.Add(new GeometryDrawing(accent, null, new RectangleGeometry(new Rect(0, 0, 24, 24), 5, 5)));

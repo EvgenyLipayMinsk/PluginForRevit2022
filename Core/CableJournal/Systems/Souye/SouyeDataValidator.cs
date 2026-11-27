@@ -1,6 +1,7 @@
 using ARBM.CableJournalExporter.Systems.Souye.Models;
 using System.Collections.Generic;
 using System.Linq;
+using PluginForRevit2022.Core;
 
 namespace ARBM.CableJournalExporter.Systems.Souye
 {
@@ -37,6 +38,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// <returns>
         /// Список строк с описаниями ошибок. Пустой список означает успешную валидацию.
         /// </returns>
+        public List<string> ValidateGroups(IReadOnlyList<SouyeControllerWithLoops> groups) =>
+            groups.SelectMany(group => Validate(group).Select(error => group.Controller.RackNumber.HasValue
+                ? $"Прибор {group.Controller.RackNumber}: {error}" : error)).ToList();
+
         public List<string> Validate(SouyeControllerWithLoops data)
         {
             var errors = new List<string>();
@@ -109,7 +114,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
 
             // Проверка уникальности ElementMark внутри шлейфа
             var duplicateMarks = group.Devices
-                .GroupBy(d => d.ElementMarkRaw)
+                .GroupBy(d => d.ElementMarkParsed)
                 .Where(g => g.Count() > 1)
                 .Select(g => g.Key)
                 .ToList();
@@ -152,20 +157,15 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 ? string.Join(", ", deviceParts)
                 : $"ElementId={device.Element?.Id}";
 
-            // ── ARBM_ПСБ_Адрес устройства должен быть числом ──────────────────
-            if (device.LoopAddressParsed == -1)
-                errors.Add(
-                    $"Шлейф {loopId}, устройство ({deviceId}): " +
-                    $"значение параметра «ARBM_ПСБ_Адрес устройства» = \"{device.LoopAddressRaw}\" " +
-                    "не является целым числом.");
+            if (device.LoopAddressParsed < 1 || (!device.UsesLegacyNumber && device.LoopAddressParsed > SouyeLineIdentity.MaxLine))
+            {
+                string parameter = device.UsesLegacyNumber ? "ARBM_ПСБ_Адрес устройства" : "ARBM_Номер линии";
+                string range = device.UsesLegacyNumber ? "положительным целым числом" : $"целым числом от 1 до {SouyeLineIdentity.MaxLine}";
+                errors.Add($"Шлейф {loopId}, устройство ({deviceId}): «{parameter}» = «{device.LoopAddressRaw}». Номер должен быть {range}.");
+            }
 
-            // ── ARBM_SP_ElementMark должен быть числом ────────────────────────
-            if (device.ElementMarkParsed == -1)
-                errors.Add(
-                    $"Шлейф {loopId}, устройство ({deviceId}): " +
-                    $"значение параметра «ARBM_SP_ElementMark» = \"{device.ElementMarkRaw}\" " +
-                    "не является целым числом.");
-
+            if (device.ElementMarkParsed < 1)
+                errors.Add($"Шлейф {loopId}, устройство ({deviceId}): «ARBM_SP_ElementMark» = «{device.ElementMarkRaw}». Укажите положительный порядковый номер.");
             // ── Мощность должна быть задана и положительна ────────────────────
             if (device.Power == null || device.Power <= 0.0)
                 errors.Add(

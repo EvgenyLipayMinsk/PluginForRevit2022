@@ -8,7 +8,7 @@ namespace PluginForRevit2022.Core
 {
     internal static class CableDiagnosticsOperations
     {
-        internal static string Text(Element e, string name) => e.LookupParameter(name)?.AsString()?.Trim() ?? "";
+        internal static string Text(Element e, string name) => RevitText.FindParameter(e, name)?.AsString()?.Trim() ?? "";
         private static List<FamilyInstance> Devices(Document doc, McpArgs args)
         {
             var settings = MarkingSettings.Load();
@@ -75,7 +75,8 @@ namespace PluginForRevit2022.Core
                 string[] key = group.Key.Split('|');
                 var row = new Dictionary<string, object> { ["line"] = group.Key, ["ok"] = false };
                 rows.Add(row);
-                var devices = group.ToList(); var routes = new List<FamilyInstance>();
+                                var devices = group.ToList(); var routes = new List<FamilyInstance>();
+                Func<Element, bool> routeFilter = null;
                 FamilyInstance controller = args.Long("controllerElementId") == null ? null :
                     doc.GetElement(RevitIds.ToElementId(args.Long("controllerElementId").Value)) as FamilyInstance;
                 if (args.Long("controllerElementId") != null && args.String("line") == null)
@@ -92,11 +93,51 @@ namespace PluginForRevit2022.Core
                         if (candidates.Count == 1) controller = candidates[0];
                     }
                 }
+                else if (key[0] == "souye")
+                {
+                    int rack = int.Parse(key[2]);
+                    int line = int.Parse(key[3]);
+                    string comment = DeviceMarkingOperations.CommentOf(devices[0]);
+                    bool functionalZones = key[1].StartsWith("@", StringComparison.Ordinal);
+                    bool Matches(FamilyInstance item) => SouyeLineIdentity.IsRack(item) && (functionalZones
+                        ? item.UniqueId == key[1].Substring(1) && SouyeLineIdentity.RackContains(item, rack)
+                        : SouyeLineIdentity.MatchesRack(item, key[1], rack));
+                    if (controller == null)
+                    {
+                        var candidates = SouyeLineIdentity.Racks(doc, comment).Where(Matches).ToList();
+                        row["controllerCandidates"] = candidates.Select(r => RevitIds.IdOf(r.Id)).ToList();
+                        if (candidates.Count == 1) controller = candidates[0];
+                    }
+                    else if (!Matches(controller))
+                    {
+                        row["status"] = "controller_mismatch";
+                        row["message"] = "Указанная стойка СОУЭ не соответствует маркировке выбранной линии.";
+                        continue;
+                    }
+                    string routeBuilding = key[1];
+                    if (functionalZones)
+                    {
+                        var zones = devices.Select(device => SouyeLineIdentity.Read(device, DeviceMarkingOperations.ParamBuilding))
+                            .Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToList();
+                        routeBuilding = zones.Count == 1 ? zones[0] : null;
+                    }
+                    try
+                    {
+                        routeFilter = SouyeLineIdentity.MarkingRouteFilter(doc, routeBuilding, rack, line, comment, functionalZones);
+                    }
+                    catch (SouyeRouteLayoutException ex)
+                    {
+                        row["status"] = "route_layout_error";
+                        row["message"] = ex.Message;
+                        continue;
+                    }
+                    routes = cables.Where(cable => routeFilter(cable)).ToList();
+                }
                 else
                 {
-                    // Для адресных СОТС/СОУЭ прибор выбирает проектировщик; не угадываем его по близости.
+                    // Для адресных СОТС и старой СОУЭ прибор выбирает проектировщик; не угадываем его по близости.
                     routes = cables.Where(c => DeviceMarkingOperations.HasComment(c, DeviceMarkingOperations.CommentOf(devices[0]))).ToList();
-                    if (args.String("routeGrouping") != null) routes = routes.Where(c => Text(c, DeviceMarkingOperations.ParamGrouping) == args.String("routeGrouping")).ToList();
+                    if (args.String("routeGrouping") != null) routes = routes.Where(c => DeviceMarkingOperations.ReadGrouping(c) == args.String("routeGrouping")).ToList();
                     else { row["status"] = "route_grouping_required"; row["message"] = "Для адресной линии укажите точное routeGrouping и controllerElementId."; continue; }
                 }
                 row["routeCount"] = routes.Count;

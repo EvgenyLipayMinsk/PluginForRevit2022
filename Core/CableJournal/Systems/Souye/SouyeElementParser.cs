@@ -1,3 +1,4 @@
+using PluginForRevit2022.Core;
 using ARBM.CableJournalExporter.Systems.Souye.Models;
 using Autodesk.Revit.DB;
 using System.Linq;
@@ -24,6 +25,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         private const string ParamProductName  = "ARBM_ПС_Имя изделия";
         private const string ParamBco          = "ARBM_ПСБ_БЦО";
         private const string ParamLoopAddress  = "ARBM_ПСБ_Адрес устройства";
+        private const string ParamLineNumber   = "ARBM_Номер линии";
+        private const string ParamRackNumber   = "ARBM_Номер прибора";
         private const string ParamElementMark  = "ARBM_SP_ElementMark";
 
         // ─── Конструктор ──────────────────────────────────────────────────────────
@@ -53,7 +56,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// перекрёстной проверки при сборе устройств.
         /// </param>
         /// <returns>Заполненный <see cref="SouyeControllerInfo"/>.</returns>
-        public SouyeControllerInfo ParseController(Element element, string commentsValue)
+        public SouyeControllerInfo ParseController(Element element, string commentsValue, int? number, bool severalDevices)
         {
             return new SouyeControllerInfo
             {
@@ -61,6 +64,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 Floor         = TryGetStringParam(element, _paramFloor),
                 HousingBlock  = TryGetStringParam(element, ParamHousingBlock),
                 ProductName   = TryGetStringParam(element, ParamProductName),
+                RackNumber    = number,
+                RackContainsSeveralDevices = severalDevices,
                 CommentsValue = commentsValue,
             };
         }
@@ -78,7 +83,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         /// <returns>Заполненный <see cref="SouyeDeviceInfo"/>.</returns>
         public SouyeDeviceInfo ParseDevice(Element element)
         {
-            var loopAddressRaw = TryGetStringParam(element, ParamLoopAddress);
+            string number = RevitText.FindParameter(element, ParamRackNumber)?.AsString()?.Trim();
+            string line = RevitText.FindParameter(element, ParamLineNumber)?.AsString()?.Trim();
+            bool legacy = string.IsNullOrEmpty(number) && string.IsNullOrEmpty(line);
+            string loopAddressRaw = legacy ? TryGetStringParam(element, ParamLoopAddress) : line;
             var elementMarkRaw = TryGetStringParam(element, ParamElementMark);
 
             var device = new SouyeDeviceInfo
@@ -88,6 +96,8 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 HousingBlock   = TryGetStringParam(element, ParamHousingBlock),
                 Bco            = TryGetStringParam(element, ParamBco),
                 LoopAddressRaw = loopAddressRaw,
+                RackNumber     = ReadRackNumber(element),
+                UsesLegacyNumber = legacy,
                 ElementMarkRaw = elementMarkRaw,
                 Power          = TryGetDoubleParam(element, _paramPower),
             };
@@ -104,6 +114,10 @@ namespace ARBM.CableJournalExporter.Systems.Souye
             return device;
         }
 
+        private static int? ReadRackNumber(Element element) =>
+            PluginForRevit2022.Core.SouyeLineIdentity.Number(RevitText.FindParameter(element, ParamRackNumber)?.AsString(), out int rack)
+                ? (int?)rack : null;
+
         // ─── Вспомогательные методы ───────────────────────────────────────────────
 
         /// <summary>
@@ -119,7 +133,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         public string TryGetStringParam(Element element, string paramName)
         {
             // 1. Сначала ищем в параметрах экземпляра
-            var param = element.LookupParameter(paramName);
+            var param = RevitText.FindParameter(element, paramName);
             
             // 2. Если не нашли, ищем в параметрах типа
             if (param == null && element.Document != null)
@@ -127,7 +141,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 var elementType = element.Document.GetElement(element.GetTypeId()) as ElementType;
                 if (elementType != null)
                 {
-                    param = elementType.LookupParameter(paramName);
+                    param = RevitText.FindParameter(elementType, paramName);
                 }
             }
 
@@ -151,7 +165,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
         public double? TryGetDoubleParam(Element element, string paramName)
         {
             // 1. Сначала ищем в параметрах экземпляра
-            var param = element.LookupParameter(paramName);
+            var param = RevitText.FindParameter(element, paramName);
             
             // 2. Если не нашли, ищем в параметрах типа
             if (param == null && element.Document != null)
@@ -159,7 +173,7 @@ namespace ARBM.CableJournalExporter.Systems.Souye
                 var elementType = element.Document.GetElement(element.GetTypeId()) as ElementType;
                 if (elementType != null)
                 {
-                    param = elementType.LookupParameter(paramName);
+                    param = RevitText.FindParameter(elementType, paramName);
                 }
             }
 

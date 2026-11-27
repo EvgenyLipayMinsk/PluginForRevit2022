@@ -101,6 +101,7 @@ namespace PluginForRevit2022
 
         public PlaceDetectorsWindow(IEnumerable<string> families)
         {
+            UI.AerBimAppearance.Apply(this);
             Title = "Размещение извещателей";
             Width = 460;
             SizeToContent = SizeToContent.Height;
@@ -115,7 +116,9 @@ namespace PluginForRevit2022
             var panel = new StackPanel { Margin = new Thickness(12) };
             void Row(string label, Control control)
             {
-                panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 6, 0, 2) });
+                var caption = UI.AerBimAppearance.Label(label, control);
+                caption.Margin = new Thickness(0, 6, 0, 2);
+                panel.Children.Add(caption);
                 panel.Children.Add(control);
             }
             Row("Тип извещателя", _type);
@@ -126,7 +129,12 @@ namespace PluginForRevit2022
 
             var ok = new Button { Content = "Далее: кликнуть помещение", IsDefault = true, Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(6) };
             ok.Click += (s, e) => Accept();
-            panel.Children.Add(ok);
+            UI.AerBimAppearance.Primary(this, ok);
+            var cancel = new Button { Content = "Отмена", IsCancel = true, Margin = new Thickness(0, 12, 8, 0) };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            actions.Children.Add(cancel);
+            actions.Children.Add(ok);
+            panel.Children.Add(actions);
             Content = panel;
         }
 

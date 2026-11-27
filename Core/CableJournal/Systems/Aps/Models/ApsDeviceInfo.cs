@@ -1,4 +1,4 @@
-﻿using Autodesk.Revit.DB;
+using Autodesk.Revit.DB;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -223,7 +223,6 @@ namespace ARBM.CableJournalExporter.Models
         /// EN: Number of object line (1, 2, 3, ...).
         /// </summary>
         public int LoopNumber { get; set; }
-        internal string ConnectionLineKey { get; set; }
 
         /// <summary>
         /// Список устройств, подключённых к этой линии, упорядоченных по номерам устройств.
@@ -312,34 +311,10 @@ namespace ARBM.CableJournalExporter.Models
     }
 
     /// <summary>
-    /// Расширитель объектовых линий для системы АПС.
-    /// Используется для подключения дополнительных объектовых линий сверх базовых.
-    /// 
-    /// В текущей версии — заглушка для будущей реализации.
-    /// 
-    /// EN: Expander for additional object lines in APS system.
-    /// Used to connect additional object lines beyond the basic ones.
-    /// 
-    /// In current version — stub for future implementation.
-    /// </summary>
-    public class ApsExpander
-    {
-        // Заглушка для будущей реализации
-        // Stub for future implementation
-    }
-
-    /// <summary>
     /// Полная информация об приемно-контрольном приборе (ПКП) системы АПС.
     /// Содержит идентификатор, возможности, параметры и структурирует устройства по объектовым линиям.
     /// 
-    /// Аналогично ControllerWithLoops, но специализирован для системы АПС с поддержкой расширителей
-    /// для будущих версий.
-    /// 
-    /// EN: Complete information about APS control panel.
-    /// Contains identifier, capabilities, parameters and structures devices by object lines.
-    /// 
-    /// Similar to ControllerWithLoops but specialized for APS system with support for expanders
-    /// in future versions.
+    /// EN: Complete information about the APS control panel and its loops.
     /// </summary>
     public class ApsControllerWithLoops
     {
@@ -362,23 +337,6 @@ namespace ARBM.CableJournalExporter.Models
         /// Key — line number, value — list of devices in this line.
         /// </summary>
         public List<ApsLoopGroup> Loops { get; set; } = new List<ApsLoopGroup>();
-
-        /// <summary>
-        /// Расширители, которые содержат дополнительные объектовые линии (сверх первых базовых).
-        /// В текущей версии не используется, но добавлено для будущей совместимости.
-        /// EN: Expanders that hold additional object lines (beyond the basic ones).
-        /// Not used in current version but added for future compatibility.
-        /// </summary>
-        public List<ApsExpander> Expanders { get; set; } = new List<ApsExpander>();
-
-        /// <summary>
-        /// Проверяет, содержит ли ПКП хотя бы один расширитель.
-        /// EN: Indicates whether this control panel has any expanders.
-        /// </summary>
-        public bool HasExpanders()
-        {
-            return Expanders != null && Expanders.Count > 0;
-        }
 
         /// <summary>
         /// Создаёт строковое представление, используя ControllerId.

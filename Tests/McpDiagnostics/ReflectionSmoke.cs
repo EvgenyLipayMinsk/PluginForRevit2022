@@ -18,7 +18,7 @@ class ReflectionSmoke
         try { return plugin.GetType("PluginForRevit2022.Core." + type).GetMethod(method, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, args); }
         catch (TargetInvocationException e) { throw e.InnerException; }
     }
-    static Dictionary<string, object> Manage(Dictionary<string, object> values) => (Dictionary<string, object>)Call("ClashReportFileOperations", "Manage", "Test", Args(values));
+    static Dictionary<string, object> Manage(Dictionary<string, object> values) => (Dictionary<string, object>)Call("ClashReportFileOperations", "Manage", null, "Test", Args(values));
     static int Main(string[] args)
     {
         try

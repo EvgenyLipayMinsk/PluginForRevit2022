@@ -1,4 +1,5 @@
-﻿using System;
+﻿using PluginForRevit2022.Core;
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using ARBM.CableJournalExporter.Models;
@@ -250,7 +251,7 @@ namespace ARBM.CableJournalExporter.Services
                 if (element == null)
                     return null;
 
-                var param = element.LookupParameter(paramName);
+                var param = RevitText.FindParameter(element, paramName);
                 return param?.AsString();
             }
             catch

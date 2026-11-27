@@ -155,6 +155,7 @@ namespace PluginForRevit2022
         public WorksetCommentsWindow(Document doc)
         {
             _doc = doc;
+            UI.AerBimAppearance.Apply(this);
             Title = "Комментарии по рабочим наборам";
             Width = 900;
             Height = 580;
@@ -181,6 +182,7 @@ namespace PluginForRevit2022
             };
 
             var apply = Btn("Записать", Apply);
+            UI.AerBimAppearance.Primary(this, apply);
             var close = Btn("Закрыть", Close);
             close.IsCancel = true;
             var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };

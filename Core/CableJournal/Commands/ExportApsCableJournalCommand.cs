@@ -1,0 +1,409 @@
+    using ARBM.CableJournalExporter.Models;
+using ARBM.CableJournalExporter.Revit;
+using ARBM.CableJournalExporter.Services;
+using Autodesk.Revit.Attributes;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Selection;
+using System;   
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using PluginForRevit2022.Core;
+using PluginForRevit2022.Core.CableJournal;
+using RevitTaskDialog = Autodesk.Revit.UI.TaskDialog;
+using System.Text;
+using System.Threading;
+using System.Windows.Controls;
+using static ARBM.CableJournalExporter.Services.RouteLengthCalculator.Graph;
+
+namespace ARBM.CableJournalExporter.Commands
+{
+    [Transaction(TransactionMode.Manual)]
+    public class ExportApsConnectionJournalCommand : ExportApsCableJournalCommand
+    {
+        protected override bool ReviewConnectionOrder => true;
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    public class ExportApsCableJournalCommand : IExternalCommand
+    {
+        private const string ConnectionTitle = "КЖ АПС по порядку подключения";
+        protected virtual bool ReviewConnectionOrder => false;
+
+        public Result Execute(
+           ExternalCommandData commandData,
+           ref string message,
+           ElementSet elements)
+        {
+            // Получаем интерфейс для работы с документом
+            // EN: Get interface for working with the document
+            UIDocument uidoc = commandData.Application.ActiveUIDocument;
+            Document doc = uidoc.Document;
+
+            // ── Запускаем секундомер для измерения времени выполнения ──────────────
+            var stopwatch = Stopwatch.StartNew();
+
+            // Создаём монитор отмены и сторожевой таймер (watchdog).
+            var cancelMonitor = new CancellationMonitor();
+
+            // Конфиг таймаута: 30 минут (можно изменить).
+            TimeSpan timeout = TimeSpan.FromMinutes(30);
+
+            // Таймер сторожа — по истечении таймаута помечает запрос отмены и логирует текущее состояние.
+            Timer watchdog = null;
+            try
+            {
+                watchdog = new Timer(_ =>
+                {
+                    // Best‑effort: логируем причину и_OPERACI, затем помечаем отмену.
+                    string op = cancelMonitor.CurrentOperation ?? "<unknown>";
+                    ExecutionLogger.Log("watchdog", "timeout", details: $"timeoutMs={timeout.TotalMilliseconds}, currentOperation={op}");
+                    cancelMonitor.RequestCancel($"timeout {timeout}");
+                }, null, timeout, Timeout.InfiniteTimeSpan);
+
+                // =================================================================
+                // БЛОК 1️⃣: Выбор элемента с параметром Comments
+                // BLOCK 1️⃣: Select element with Comments parameter
+                // =================================================================
+
+                // Запрашиваем выбор одного элемента, используя кастомный фильтр CommentsFilter
+                // Фильтр ограничивает выбор только элементами из разрешенных категорий,
+                // у которых уже установлено значение параметра Comments
+                // EN: Request to select one element using custom CommentsFilter
+                // The filter restricts selection to only elements from allowed categories
+                // that already have Comments parameter set
+                Reference pickedRef;
+                try
+                {
+                    pickedRef = uidoc.Selection.PickObject(ObjectType.Element, new CommentsFilter(), ReviewConnectionOrder ? "Выберите размеченное устройство нужного шлейфа АПС" : "Выберите элемент с комментарием для КЖ АПС");
+                }
+                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                {
+                    return Result.Cancelled;
+                }
+
+                // Если пользователь отменил выбор (нажал Escape или закрыл диалог)
+                // EN: If user cancelled selection (pressed Escape or closed dialog)
+                if (pickedRef == null)
+                    return Result.Cancelled;
+
+                // Получаем сам элемент из документа по ссылке
+                // EN: Get the actual element from the document by reference
+                Element picked = doc.GetElement(pickedRef);
+
+                // Извлекаем значение параметра "Comments" (системный параметр Revit)
+                // Используем null-conditional оператор (?.) для безопасного доступа
+                // EN: Extract the value of "Comments" parameter (Revit system parameter)
+                // Use null-conditional operator (?.) for safe access
+                string paramValue = picked
+                    .get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+                    ?.AsString();
+
+                // Проверяем, что значение Comments непусто
+                // EN: Verify that Comments value is not empty
+                if (string.IsNullOrWhiteSpace(paramValue))
+                {
+                    TaskDialog.Show("Ошибка формирования КЖ",
+                        "У выбранного элемента не заполнен параметр «Комментарии».");
+                    return Result.Cancelled;
+                }
+
+                string connectionLine = ReviewConnectionOrder ? DeviceLineOperations.KeyOf(picked) : null;
+                if (ReviewConnectionOrder && (connectionLine == null || !connectionLine.StartsWith("aps|", StringComparison.Ordinal)))
+                {
+                    RevitTaskDialog.Show(ConnectionTitle, "Выберите размеченное устройство нужного шлейфа АПС.");
+                    return Result.Cancelled;
+                }
+
+                var dialog = new FileDialogService();
+                string templatePath = null;
+                if (!ReviewConnectionOrder)
+                {
+                    Result templateResult = SelectTemplate(dialog, out templatePath);
+                    if (templateResult != Result.Succeeded) return templateResult;
+                }
+
+                // --- Сбор контроллеров: перед долгой операцией указываем операцию в мониторе ---
+                cancelMonitor.SetCurrentOperation("CollectApsControllers");
+
+                var parser = new ApsElementParser();
+                var collector = new ApsDataCollector(parser);
+                var validationMessages = new List<string>();
+                List<ApsControllerWithLoops> apsControllersWithLoops;
+                using (ReviewConnectionOrder ? JournalDialog.Capture(validationMessages) : null)
+                {
+                    apsControllersWithLoops = collector.CollectApsControllersWithLoopsByParam(doc, paramValue, cancelMonitor, connectionLine);
+                }
+
+                cancelMonitor.ClearCurrentOperation();
+
+                if (cancelMonitor.IsCancellationRequested)
+                {
+                    // watchdog сработал — лог и корректное завершение
+                    ExecutionLogger.Log("ExportApsCableJournalCommand", "cancelled_by_watchdog", details: cancelMonitor.CancelReason);
+                    TaskDialog.Show("Формирование КЖ прервано", "Истекло время ожидания. Подробности приведены в журнале работы плагина.");
+                    return Result.Cancelled;
+                }
+
+                if (apsControllersWithLoops == null || apsControllersWithLoops.Count == 0)
+                {
+                    if (ReviewConnectionOrder)
+                        ShowConnectionError(connectionLine, parser.FloorParameter, "Не удалось собрать устройства шлейфа.", validationMessages);
+                    return Result.Cancelled;
+                }
+
+                PluginForRevit2022.LineConnectionWindow.Line reviewed = null;
+                if (ReviewConnectionOrder)
+                {
+                    string key = connectionLine;
+                    var selected = (from controller in apsControllersWithLoops
+                                    from loop in controller.Loops
+                                    where loop.Devices.Any(d => DeviceLineOperations.KeyOf(d.BaseInfo.Element) == key)
+                                    select new { controller, loop }).ToList();
+                    if (selected.Count != 1)
+                    {
+                        string reason = selected.Count == 0 ? "Шлейф не найден у прибора." : "Найдено несколько приборов для одного шлейфа.";
+                        ShowConnectionError(key, parser.FloorParameter, reason, validationMessages);
+                        return Result.Cancelled;
+                    }
+                    var entry = selected[0];
+                    var devices = entry.loop.Devices.Select(d => (FamilyInstance)d.BaseInfo.Element).ToList();
+                    if (!new HashSet<string>(DeviceLineOperations.DevicesOf(doc, key).Select(d => d.UniqueId)).SetEquals(devices.Select(d => d.UniqueId)))
+                    {
+                        ShowConnectionError(key, parser.FloorParameter, "Часть устройств линии не прошла проверку КЖ.", validationMessages);
+                        return Result.Cancelled;
+                    }
+                    reviewed = PluginForRevit2022.LineManagerWindow.PrepareConnection(doc, key, devices, entry.controller.Controller.Element,
+                        entry.controller.ControllerId.ToString(), entry.loop.TypeLoop == TypeLoop.Annular);
+                    if (new PluginForRevit2022.LineConnectionWindow(new[] { reviewed }, "Сформировать КЖ",
+                        commandData.Application.MainWindowHandle, title: ConnectionTitle).ShowDialog() != true) return Result.Cancelled;
+
+                    var byId = entry.loop.Devices.ToDictionary(d => d.BaseInfo.Element.UniqueId);
+                    entry.loop.Devices = reviewed.Order.Select(id => byId[id]).ToList();
+                    entry.controller.Loops = new List<ApsLoopGroup> { entry.loop };
+                    apsControllersWithLoops = new List<ApsControllerWithLoops> { entry.controller };
+
+                    Result templateResult = SelectTemplate(dialog, out templatePath);
+                    if (templateResult != Result.Succeeded) return templateResult;
+                }
+
+                LengthMode mode = LengthMode.Route;
+
+                // Перед построением графов и расчётом длин указываем операцию
+                cancelMonitor.SetCurrentOperation("BuildRecordsAndGraphs");
+
+                var builder = new ApsCableRecordBuilder(parser, doc, mode, PluginForRevit2022.Core.MarkingSettings.CableFactor("aps"));
+                List<CableRecord> records = null;
+                try
+                {
+                    // Перенёс Build так, чтобы он принимал монитор (будет проксировать в калькулятор графов)
+                    records = builder.Build(apsControllersWithLoops, paramValue, cancelMonitor);
+                }
+                catch (CableWalk.TunnelException ex)
+                {
+                    RevitTaskDialog.Show(CableWalk.TunnelErrorTitle, ex.Message);
+                    return Result.Failed;
+                }
+                catch (OperationCanceledException)
+                {
+                    ExecutionLogger.Log("ExportApsCableJournalCommand", "cancelled_by_watchdog", details: cancelMonitor.CancelReason);
+                    TaskDialog.Show("Формирование КЖ прервано", "Истекло время ожидания. Подробности приведены в журнале работы плагина.");
+                    return Result.Cancelled;
+                }
+                finally
+                {
+                    cancelMonitor.ClearCurrentOperation();
+                }
+
+                if (records == null || records.Count == 0)
+                {
+                    TaskDialog.Show("Нет данных для КЖ",
+                        "Не сформировано ни одной строки кабельного журнала. Проверьте маркировку устройств и наличие трасс для выбранной линии.");
+                    return Result.Cancelled;
+                }
+
+                // =================================================================
+                // БЛОК 6️⃣: Выбор пути сохранения файла
+                // BLOCK 6️⃣: Select file save path
+                // =================================================================
+
+                string savePath = dialog.SelectSaveLocation();
+                if (string.IsNullOrWhiteSpace(savePath))
+                {
+                    TaskDialog.Show("Формирование КЖ отменено",
+                        "Файл для сохранения кабельного журнала не выбран.");
+                    return Result.Cancelled;
+                }
+
+                // =================================================================
+                // БЛОК 7️⃣: Экспорт в Excel
+                // BLOCK 7️⃣: Export to Excel
+                // =================================================================
+
+                var exporter = new JournalFormExporter(dialog.SelectedForm);
+
+                // Указываем операцию экспорта (короткая).
+                cancelMonitor.SetCurrentOperation("ExportToExcel");
+                try
+                {
+                    if (reviewed != null && records.Any(r => r.IsFallbackForLength) &&
+                        System.Windows.MessageBox.Show("Некоторые длины рассчитаны с обходом разрыва или по прямой. Они будут выделены в журнале. Продолжить выгрузку?",
+                            "КЖ по подключению", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
+                        return Result.Cancelled;
+                    PluginForRevit2022.Core.MarkingSettings.ApplyLineReserve(records);
+                    if (reviewed == null) exporter.ExportCableRecords(templatePath, savePath, records);
+                    else
+                    {
+                        using (var group = new TransactionGroup(doc, "AerBIM: подтвердить порядок и выгрузить КЖ"))
+                        {
+                            group.Start();
+                            DeviceLineOperations.SaveConnectionOrder(doc, reviewed.Key, reviewed.Order);
+                            exporter.ExportCableRecords(templatePath, savePath, records);
+                            if (group.Assimilate() != TransactionStatus.Committed)
+                                RevitTaskDialog.Show(ConnectionTitle, "Журнал выгружен. Revit не сохранил порядок подключения в модели.");
+                        }
+                    }
+                }
+                finally
+                {
+                    cancelMonitor.ClearCurrentOperation();
+                }
+
+                // Останавливаем секундомер
+                stopwatch.Stop();
+
+                ExecutionLogger.Log(
+                    "ExportApsCableJournalCommand",
+                    "command_succeeded",
+                    durationMs: stopwatch.ElapsedMilliseconds,
+                    details: $"logPath={ExecutionLogger.GetLogPath()}");
+
+                // =================================================================
+                // БЛОК 8️⃣: Итоговое окно с результатами
+                // BLOCK 8️⃣: Summary dialog with results
+                // =================================================================
+
+                ShowSummary(records.Count, savePath, stopwatch.Elapsed);
+
+                return Result.Succeeded;
+            }
+            finally
+            {
+                // Отключаем сторожевой таймер
+                try { watchdog?.Dispose(); } catch { }
+            }
+        }
+
+        // ─── Вспомогательные методы отображения диалоговых окон ──────────────────
+
+        /// <summary>
+        /// Отображает итоговое информационное окно после успешного экспорта АПС.
+        /// Показывает количество строк, время выполнения и пути к файлам.
+        /// </summary>
+        private static Result SelectTemplate(FileDialogService dialog, out string templatePath)
+        {
+            templatePath = dialog.SelectTemplateFile();
+            if (string.IsNullOrWhiteSpace(templatePath)) return Result.Cancelled;
+
+            var validation = new JournalFormExporter(dialog.SelectedForm).Validate(templatePath, new TemplateStructure());
+            if (validation.IsValid) return Result.Succeeded;
+
+            RevitTaskDialog.Show("Ошибка шаблона кабельного журнала", validation.Message);
+            return Result.Failed;
+        }
+
+        private static void ShowConnectionError(string key, string floorParameter, string reason, List<string> details)
+        {
+            string[] line = key.Split('|');
+            string context = $"Прибор «{line[1]}.ARK.{line[2]}», шлейф {line[3]}. Параметр этажа «{floorParameter}».";
+            string report = string.Join("\n\n", new[] { reason, context }.Concat(details));
+            PluginLog.Warn("aps.connection", report);
+            RevitTaskDialog.Show(ConnectionTitle, report);
+        }
+
+        private static void ShowSummary(
+            int totalRecords,
+            string outputPath,
+            TimeSpan executionTime)
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine($"Всего строк в кабельном журнале: {totalRecords}");
+            sb.AppendLine();
+
+            // Форматируем время выполнения
+            string executionTimeStr;
+            if (executionTime.TotalSeconds > 60)
+            {
+                executionTimeStr = $"{executionTime.TotalMinutes:F2} мин";
+            }
+            else
+            {
+                executionTimeStr = $"{executionTime.TotalSeconds:F2} сек";
+            }
+            sb.AppendLine($"Время выполнения команды: {executionTimeStr}");
+            sb.AppendLine();
+
+            sb.AppendLine($"Файл сохранён:");
+            sb.AppendLine(SplitLongPath(outputPath, 60));
+            sb.AppendLine();
+
+            sb.AppendLine($"Логирование:");
+            string logPath = ExecutionLogger.GetLogPath();
+            if (!string.IsNullOrEmpty(logPath))
+            {
+                sb.AppendLine(SplitLongPath(logPath, 60));
+            }
+            else
+            {
+                sb.AppendLine("Не удалось получить путь к лог-файлу");
+            }
+
+            var dialog = new TaskDialog("Экспорт КЖ АПС — Готово");
+            dialog.MainInstruction = "Кабельный журнал АПС успешно сформирован.";
+            dialog.MainContent = sb.ToString();
+            dialog.CommonButtons = TaskDialogCommonButtons.Ok;
+            dialog.Show();
+        }
+
+        /// <summary>
+        /// Разбивает длинный путь на несколько строк с учетом максимальной ширины.
+        /// </summary>
+        /// <param name="path">Полный путь к файлу.</param>
+        /// <param name="maxWidth">Максимальная ширина строки в символах.</param>
+        /// <returns>Путь, разбитый на строки.</returns>
+        private static string SplitLongPath(string path, int maxWidth)
+        {
+            if (string.IsNullOrEmpty(path) || path.Length <= maxWidth)
+                return path;
+
+            var sb = new StringBuilder();
+            int currentPos = 0;
+
+            while (currentPos < path.Length)
+            {
+                int remainingLength = path.Length - currentPos;
+                int chunkLength = Math.Min(maxWidth, remainingLength);
+
+                // Если это не последний кусок, пытаемся найти разделитель (\\ или /)
+                if (chunkLength < remainingLength)
+                {
+                    int lastSeparator = path.LastIndexOfAny(new[] { '\\', '/' }, currentPos + chunkLength - 1, chunkLength);
+                    if (lastSeparator > currentPos)
+                    {
+                        chunkLength = lastSeparator - currentPos + 1;
+                    }
+                }
+
+                if (sb.Length > 0)
+                    sb.AppendLine();
+
+                sb.Append(path.Substring(currentPos, chunkLength));
+                currentPos += chunkLength;
+            }
+
+            return sb.ToString();
+        }
+    }
+}

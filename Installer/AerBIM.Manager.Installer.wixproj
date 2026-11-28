@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <ProductVersion Condition=" '$(ProductVersion)' == '' ">1.0.0.0</ProductVersion>
+    <OutputName>AerBIM.Manager-$(ProductVersion)</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Cultures>ru-RU</Cultures>
+    <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
+    <OutputPath>out\</OutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Product.wxs" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

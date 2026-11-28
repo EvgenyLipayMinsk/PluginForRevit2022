@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aerbim-revit": {
+      "command": "node",
+      "args": ["C:\\Program Files\\AerBIM\\PluginForRevit\\McpServer\\index.js"],
+      "env": { "AERBIM_MCP_PORT": "8965" }
+    }
+  }
+}

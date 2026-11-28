@@ -1,0 +1,8 @@
+﻿<Window x:Class="PluginForRevit2022.UserRemoveParameters"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Удалить параметры проекта"
+        Width="820" Height="600" MinWidth="560" MinHeight="380"
+        WindowStartupLocation="CenterOwner" FontSize="13">
+    <!-- Содержимое строится в коде (UserRemoveParameters.xaml.cs) — в том же стиле, что окна маркировки и коллизий -->
+</Window>
